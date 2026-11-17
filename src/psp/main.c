@@ -53,10 +53,25 @@ PSP_MODULE_INFO("PSPTorqueOBD", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
 PSP_HEAP_SIZE_KB(4096);
 
-#define CONFIG_PATH "ms0:/PSP/GAME/PSPTorqueOBD/host.txt"
-#define LOG_DIR "ms0:/PSP/GAME/PSPTorqueOBD"
+/* Carpeta de datos: la convencion de la consola es SAVEDATA, y el
+ * nombre de 9 caracteres es el que usa el firmware para sus partidas
+ * (PSPTORQUE = 9). El log, los ajustes y host.txt viven aqui, no junto
+ * al EBOOT: asi el usuario puede instalar el EBOOT donde quiera. */
+#define SAVEDATA_DIR "ms0:/PSP/SAVEDATA/PSPTORQUE"
+#define LOG_DIR SAVEDATA_DIR
+#define CONFIG_PATH SAVEDATA_DIR "/host.txt"
 #define LOG_PREFIX LOG_DIR "/phase1_"
-#define SETTINGS_PATH "ms0:/PSP/GAME/PSPTorqueOBD/settings.txt"
+#define SETTINGS_PATH SAVEDATA_DIR "/settings.txt"
+/* Protocolo forzado, opcional: un numero (3 = ISO 9141-2, 5 = KWP
+ * init rapido, 6 = CAN 11/500, 7 = CAN 29/500). Vacio = automatico. */
+#define PROTO_PATH SAVEDATA_DIR "/protocol.txt"
+
+/* Instalaciones anteriores guardaban los datos en la carpeta del EBOOT.
+ * Se leen de ahi si todavia no hay nada en SAVEDATA, para no perder los
+ * ajustes de quien ya tenia la app instalada. */
+#define LEGACY_DIR "ms0:/PSP/GAME/PSPTorqueOBD"
+#define LEGACY_SETTINGS_PATH LEGACY_DIR "/settings.txt"
+#define LEGACY_CONFIG_PATH LEGACY_DIR "/host.txt"
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
@@ -66,6 +81,7 @@ PSP_HEAP_SIZE_KB(4096);
  * antes de mandar el siguiente comando. El ELM327 hace tareas internas
  * despues de responder y, si le llega otro comando, contesta STOPPED y se
  * queda atascado. Este es el margen de seguridad si el prompt no llega. */
+#define ELM_SEARCH_WAIT_MS 20000u
 #define ELM_QUIET_MS 60
 #define ELM_PROMPT_WAIT_MS 250
 
@@ -87,6 +103,7 @@ typedef struct {
     int error;
     int unable;
     int stopped;
+    int searching;   /* el adaptador esta buscando el protocolo */
     int prompt;
     elm_frame frame;
     char text[64];
@@ -143,7 +160,8 @@ static obd_smooth g_ema_thr;
 #define MODE_MODULES   4
 #define MODE_SNIFFER   5
 #define MODE_INFO      6
-#define MODE_COUNT     7
+#define MODE_PROBE     7   /* sonda del coche: solo diagnostico */
+#define MODE_COUNT     8
 
 #define HIST_MAX 180
 
@@ -613,6 +631,8 @@ static void log_pick_path(void)
     }
 }
 
+static int g_log_broken = 0;
+
 static void log_open(void)
 {
     g_log_path[0] = '\0';
@@ -621,6 +641,7 @@ static void log_open(void)
                          PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC,
                          0777);
     g_log_dirty = 0;
+    g_log_broken = (g_log_fd < 0);
 }
 
 static void log_flush(void);
@@ -759,6 +780,30 @@ static void settings_apply(void)
     g_fx_skill_until = 0;
 }
 
+/* Protocolo forzado desde protocol.txt. 0 = automatico. */
+static int g_proto_force = 0;
+
+static void proto_load(void)
+{
+    char buf[16];
+    SceUID fd = sceIoOpen(PROTO_PATH, PSP_O_RDONLY, 0777);
+
+    if (fd < 0) {
+        return;
+    }
+    int n = sceIoRead(fd, buf, sizeof(buf) - 1);
+    sceIoClose(fd);
+    if (n <= 0) {
+        return;
+    }
+    buf[n] = '\0';
+    int v = atoi(buf);
+    if (v == 3 || v == 5 || v == 6 || v == 7 || v == 8 || v == 9) {
+        g_proto_force = v;
+        log_file_printf("Protocolo forzado: %d\n", v);
+    }
+}
+
 static void settings_load(void)
 {
     int psp_lang = PSP_SYSTEMPARAM_LANGUAGE_ENGLISH;
@@ -798,6 +843,9 @@ static void settings_load(void)
     g_tel_item[4] = W_OFF;
 
     SceUID fd = sceIoOpen(SETTINGS_PATH, PSP_O_RDONLY, 0777);
+    if (fd < 0) {
+        fd = sceIoOpen(LEGACY_SETTINGS_PATH, PSP_O_RDONLY, 0777);
+    }
     if (fd >= 0) {
         char buf[2048];
         int n = sceIoRead(fd, buf, sizeof(buf) - 1);
@@ -1488,6 +1536,9 @@ static int load_targets(Target *list, int max)
     int count = 0;
 
     SceUID fd = sceIoOpen(CONFIG_PATH, PSP_O_RDONLY, 0777);
+    if (fd < 0) {
+        fd = sceIoOpen(LEGACY_CONFIG_PATH, PSP_O_RDONLY, 0777);
+    }
     if (fd >= 0) {
         char buf[768];
         int n = sceIoRead(fd, buf, sizeof(buf) - 1);
@@ -1857,6 +1908,13 @@ static int handle_line(elm_reply *reply, const char *line)
         reply->stopped = 1;
     }
 
+    /* El ELM327 esta buscando el protocolo. En K-line esa busqueda
+     * puede tardar 10-15 s y cortarla lo deja en STOPPED, asi que se
+     * trata como "sigue esperando", no como respuesta. */
+    if (strncmp(text, "SEARCHING", 9) == 0) {
+        reply->searching = 1;
+    }
+
     if (reply->text[0] == '\0' && !is_noise_line(text)) {
         strncpy(reply->text, text, sizeof(reply->text) - 1);
         reply->text[sizeof(reply->text) - 1] = '\0';
@@ -2079,9 +2137,18 @@ static elm_rx_status elm_rx_step(elm_rx *rx)
         }
     }
 
-    /* Timeout global. */
-    if ((int)(now - rx->start) >= rx->wait_ms) {
-        goto complete;
+    /* Timeout global. Mientras el adaptador dice SEARCHING se le da un
+     * margen largo: la busqueda de protocolo en K-line tarda 10-15 s y
+     * abortarla a los 3 s deja al ELM327 atascado en STOPPED para el
+     * resto de la sesion. */
+    {
+        uint32_t limit = (uint32_t)rx->wait_ms;
+        if (rx->reply.searching && limit < ELM_SEARCH_WAIT_MS) {
+            limit = ELM_SEARCH_WAIT_MS;
+        }
+        if ((uint32_t)(now - rx->start) >= limit) {
+            goto complete;
+        }
     }
 
     return ELM_RX_PENDING;
@@ -2623,7 +2690,13 @@ static int connect_network_and_elm(Target *targets, int *target_count,
         elm_send_and_read(sock, "ATL0", 1000, &reply);
         elm_send_and_read(sock, "ATS0", 1000, &reply);
         elm_send_and_read(sock, "ATH0", 1000, &reply);
-        elm_send_and_read(sock, "ATSP0", 3000, &reply);
+        {
+            char sp[16];
+            snprintf(sp, sizeof(sp), "ATSP%d", g_proto_force);
+            log_file_printf("Protocolo: %s (%s)\n",
+                            g_proto_force ? "forzado" : "automatico", sp);
+            elm_send_and_read(sock, sp, 3000, &reply);
+        }
 
         elm_send_and_read(sock, "ATDPN", 2000, &reply);
         strncpy(g_proto, reply.text, sizeof(g_proto) - 1);
@@ -4370,9 +4443,9 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms)
 
     const char *tabs[MODE_COUNT] = {
         tr("GENERAL"), tr("MOTOR"), tr("DIAG"),
-        tr("TELEM"), tr("MODULOS"), tr("SNIFFER"), tr("INFO")
+        tr("TELEM"), tr("MODULOS"), tr("SNIFFER"), tr("INFO"), tr("SONDA")
     };
-    static const int tab_x[MODE_COUNT] = { 6, 66, 110, 146, 190, 250, 310 };
+    static const int tab_x[MODE_COUNT] = { 6, 66, 110, 146, 190, 250, 310, 346 };
 
     for (int i = 0; i < MODE_COUNT; i++) {
         uint32_t c = (g_mode == i) ? QV_TEXT : QV_DIM;
@@ -4437,8 +4510,21 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms)
     char righttop[40];
     snprintf(righttop, sizeof(righttop), "%s  %s", state, tb);
     int right_x = GFX_W - 8 - gfx_text_width(righttop, 1);
+    /* Con la octava pestana la cabecera va justa: si el estado largo
+     * chocaria con las pestanas, se deja solo el reloj. */
+    if (right_x < 392) {
+        snprintf(righttop, sizeof(righttop), "%s", tb);
+        right_x = GFX_W - 8 - gfx_text_width(righttop, 1);
+    }
     gfx_circle((float)(right_x - 9), 12.0f, 4.0f, dot);
     gfx_text(right_x, 8, righttop, state_color, 1);
+
+    /* Si el log no se puede abrir hay que decirlo: antes se perdian
+     * todas las lineas sin avisar. */
+    if (g_log_broken) {
+        gfx_text(392 - gfx_text_width("SIN LOG", 1), 8, "SIN LOG",
+                 QV_CRIT, 1);
+    }
 
     g_gfx_dim = saved_dim;
 }
@@ -6126,6 +6212,525 @@ static void run_sniff(int sock)
     log_sync();
 }
 
+/* ------------------------------------------------------------------ */
+/* SONDA DEL COCHE (pantalla PROBE).                                  */
+/*                                                                    */
+/* Para probar la app en un coche que no es el de referencia. No es un */
+/* dashboard: lee la identidad del adaptador y de la ECU, las mascaras */
+/* de PID y despues pide cada PID una vez para dejar escrito que       */
+/* contesta la centralita y que no. Solo lectura: modo 01 y modo 09,   */
+/* ningun servicio de escritura.                                      */
+/*                                                                    */
+/* Es una herramienta de diagnostico, no parte del producto: lo que    */
+/* vale de verdad es el log de la sesion, donde quedan todas las       */
+/* respuestas crudas. En pantalla cabe el resumen.                    */
+/* ------------------------------------------------------------------ */
+
+#define PROBE_ROWS    24
+#define PROBE_LABEL   18
+#define PROBE_VALUE   18
+#define PROBE_VISIBLE 12
+#define PROBE_AT_MS   2000
+#define PROBE_PID_MS  2000
+
+enum {
+    PROBE_IDLE = 0,
+    PROBE_RUNNING,
+    PROBE_DONE,
+    PROBE_NOLINK
+};
+
+typedef struct {
+    uint8_t pid;
+    int item;                     /* elemento del panel, para tel_print */
+    char label[PROBE_LABEL];
+    char value[PROBE_VALUE];
+    uint8_t answered;
+    uint8_t no_data;
+} probe_row;
+
+static probe_row g_probe[PROBE_ROWS];
+static int g_probe_count = 0;
+static int g_probe_ok = 0;
+static int g_probe_state = PROBE_IDLE;
+static int g_probe_scroll = 0;
+static int g_probe_request = 0;
+static char g_probe_hint[48] = "";
+static char g_probe_proto[24] = "";
+static char g_probe_ati[24] = "";
+static char g_probe_vbat[16] = "";
+static char g_probe_header[48] = "";
+static char g_probe_vin[24] = "";
+static char g_probe_cal[24] = "";
+static char g_probe_cvn[24] = "";
+static char g_probe_ecu[24] = "";
+static uint32_t g_probe_mask[3];
+
+/* Copia acotada, sin depender de snprintf para no pelearse con
+ * -Wformat-truncation. */
+static void probe_copy(char *dst, size_t size, const char *src)
+{
+    size_t n;
+
+    if (size == 0) {
+        return;
+    }
+    if (src == NULL) {
+        src = "";
+    }
+    n = strlen(src);
+    if (n >= size) {
+        n = size - 1;
+    }
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+/* "a b" en un buffer acotado. */
+static void probe_pair(char *dst, size_t size, const char *a, const char *b)
+{
+    size_t used;
+
+    if (size == 0) {
+        return;
+    }
+    dst[0] = '\0';
+    probe_copy(dst, size, a);
+    used = strlen(dst);
+    if (used + 2 < size) {
+        dst[used] = ' ';
+        dst[used + 1] = '\0';
+        used++;
+    }
+    if (b != NULL && b[0] != '\0' && used + 1 < size) {
+        probe_copy(dst + used, size - used, b);
+    }
+}
+
+/* Comando AT cuya respuesta no interesa. */
+static void probe_send(int sock, const char *cmd, int wait_ms)
+{
+    elm_reply reply;
+
+    elm_send_and_read(sock, cmd, wait_ms, &reply);
+}
+
+static void probe_status(const char *msg)
+{
+    probe_copy(g_probe_hint, sizeof(g_probe_hint), msg);
+    net_ui_set(g_probe_hint);
+    net_ui_tick();
+}
+
+static void probe_clear(void)
+{
+    memset(g_probe, 0, sizeof(g_probe));
+    g_probe_count = 0;
+    g_probe_ok = 0;
+    g_probe_mask[0] = 0;
+    g_probe_mask[1] = 0;
+    g_probe_mask[2] = 0;
+    g_probe_proto[0] = '\0';
+    g_probe_ati[0] = '\0';
+    g_probe_vbat[0] = '\0';
+    g_probe_header[0] = '\0';
+    g_probe_vin[0] = '\0';
+    g_probe_cal[0] = '\0';
+    g_probe_cvn[0] = '\0';
+    g_probe_ecu[0] = '\0';
+    g_probe_hint[0] = '\0';
+    g_probe_scroll = 0;
+}
+
+/* Un comando AT, su respuesta de texto y al log. */
+static void probe_at(int sock, const char *cmd, char *out, size_t out_size)
+{
+    elm_reply reply;
+
+    elm_send_and_read(sock, cmd, PROBE_AT_MS, &reply);
+    probe_copy(out, out_size, reply.text);
+    log_file_printf("PROBE %-8s -> '%s'\n", cmd, reply.text);
+}
+
+/* Busca "41 <pid> xxxx" dentro de las lineas capturadas y devuelve la
+ * mascara. En K-line con ATH1 delante van los tres bytes de cabecera,
+ * asi que se busca el marcador 0x41 en vez de asumir la posicion: la
+ * sonda tiene que funcionar en cualquier protocolo, aunque el parser de
+ * descubrimiento del nucleo solo entienda cabeceras CAN. */
+static uint32_t probe_mask_from_capture(int *found)
+{
+    *found = 0;
+    for (int i = 0; i < g_cap_count; i++) {
+        obd_disc_line line;
+        if (!obd_disc_parse_line(g_cap[i], &line)) {
+            continue;
+        }
+        for (int b = 0; b + 6 <= line.data_len; b++) {
+            if (line.data[b] != 0x41) {
+                continue;
+            }
+            uint8_t pid = line.data[b + 1];
+            if (pid != 0x00 && pid != 0x20 && pid != 0x40) {
+                continue;
+            }
+            *found = 1;
+            return obd_pid_mask(&line.data[b + 2],
+                                line.data_len - (b + 2));
+        }
+    }
+    return 0;
+}
+
+/* Lee el bloque de mascara indicado (0x00, 0x20 o 0x40). */
+static uint32_t probe_mask_block(int sock, uint8_t block)
+{
+    char cmd[8];
+    int found = 0;
+    uint32_t mask;
+
+    snprintf(cmd, sizeof(cmd), "01%02X", (unsigned)block);
+    scan_send(sock, cmd, PROBE_PID_MS);
+    mask = probe_mask_from_capture(&found);
+    log_file_printf("PROBE %s: mascara %08X%s\n", cmd, (unsigned)mask,
+                    found ? "" : " (sin respuesta)");
+    for (int i = 0; i < g_cap_count; i++) {
+        log_file_printf("  %s\n", g_cap[i]);
+    }
+    return found ? mask : 0;
+}
+
+/* Texto ASCII de una respuesta de modo 09 (VIN, CalID, CVN, nombre de
+ * la ECU). Las respuestas largas llegan en varias lineas y algunos
+ * clones las prefieren con "0:", "1:"; el 0x49 se busca en cualquier
+ * posicion para no depender del protocolo. */
+static void probe_mode09(int sock, const char *cmd, const char *tag,
+                         char *out, size_t out_size)
+{
+    size_t written = 0;
+
+    if (out_size == 0) {
+        return;
+    }
+    out[0] = '\0';
+    scan_send(sock, cmd, PROBE_PID_MS);
+    log_file_printf("PROBE %s (%s):\n", tag, cmd);
+    for (int i = 0; i < g_cap_count; i++) {
+        log_file_printf("  %s\n", g_cap[i]);
+    }
+
+    for (int i = 0; i < g_cap_count && written + 1 < out_size; i++) {
+        obd_disc_line line;
+        if (!obd_disc_parse_line(g_cap[i], &line)) {
+            continue;
+        }
+        for (int b = 0; b + 3 < line.data_len; b++) {
+            if (line.data[b] != 0x49) {
+                continue;
+            }
+            /* 49 <pid> <n>: se salta la cabecera de respuesta y el
+             * numero de trama. */
+            for (int k = b + 3;
+                 k < line.data_len && written + 1 < out_size; k++) {
+                unsigned char c = line.data[k];
+                if (c >= 0x20 && c < 0x7F) {
+                    out[written++] = (char)c;
+                }
+            }
+            break;
+        }
+    }
+    out[written] = '\0';
+    log_file_printf("PROBE %s texto: '%s'\n", tag, out);
+}
+
+static int probe_row_for_pid(uint8_t pid)
+{
+    for (int i = 0; i < g_probe_count; i++) {
+        if (g_probe[i].pid == pid) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* Pide un PID una vez y apunta que ha pasado: respondio, NO DATA o
+ * timeout. Es la parte que dice que PID tiene de verdad el coche. */
+static void probe_pid(int sock, int item, uint8_t pid, const char *name)
+{
+    char cmd[8];
+    char label[PROBE_LABEL];
+    elm_reply reply;
+    probe_row *row;
+
+    if (g_probe_count >= PROBE_ROWS) {
+        return;
+    }
+    if (probe_row_for_pid(pid) >= 0) {
+        return;   /* MARIPOSA y VELOCIDAD comparten 0x0D */
+    }
+
+    row = &g_probe[g_probe_count++];
+    memset(row, 0, sizeof(*row));
+    row->pid = pid;
+    row->item = item;
+
+    snprintf(cmd, sizeof(cmd), "01%02X", (unsigned)pid);
+    probe_pair(label, sizeof(label), cmd, name);
+    probe_copy(row->label, sizeof(row->label), label);
+
+    elm_send_and_read(sock, cmd, PROBE_PID_MS, &reply);
+
+    if (reply.data && elm_frame_matches(&reply.frame, 0x01, pid)) {
+        obd_pid_value value;
+        row->answered = 1;
+        g_probe_ok++;
+        if (obd_pid_decode(pid, reply.frame.data, reply.frame.data_len,
+                           &value) == 0) {
+            tel_print(item, value.value, row->value, sizeof(row->value));
+        } else {
+            probe_copy(row->value, sizeof(row->value), "OK");
+        }
+    } else if (reply.no_data) {
+        row->no_data = 1;
+        probe_copy(row->value, sizeof(row->value), "NO DATA");
+    } else if (reply.unable) {
+        probe_copy(row->value, sizeof(row->value), "SIN COCHE");
+    } else if (reply.stopped) {
+        probe_copy(row->value, sizeof(row->value), "STOPPED");
+    } else {
+        probe_copy(row->value, sizeof(row->value), "TIMEOUT");
+    }
+
+    log_file_printf("PROBE %s %-11s = %s\n", cmd, name, row->value);
+}
+
+static void probe_sweep(int sock)
+{
+    for (int item = 0; item < W_COUNT; item++) {
+        uint8_t pid = widget_pid(item);
+        if (pid == 0) {
+            continue;   /* BOOST es derivado de MAP y baro */
+        }
+        probe_pid(sock, item, pid, g_widget_names[item]);
+        if (scan_cancelled()) {
+            log_file_printf("PROBE: cancelada por el usuario\n");
+            return;
+        }
+        net_ui_tick();
+    }
+}
+
+/* Mascaras: deja en el log la lista de PID que el coche declara. */
+static void probe_log_supported(void)
+{
+    log_file_printf("PROBE mascaras: %08X %08X %08X\n",
+                    (unsigned)g_probe_mask[0], (unsigned)g_probe_mask[1],
+                    (unsigned)g_probe_mask[2]);
+    log_file_printf("PROBE declara:");
+    for (int pid = 1; pid <= 0x60; pid++) {
+        int block = (pid - 1) / 0x20;
+        int bit = (pid - 1) % 0x20;
+        if (block < 0 || block > 2 || bit < 0 || bit > 31) {
+            break;
+        }
+        if ((g_probe_mask[block] >> (31 - bit)) & 1u) {
+            log_file_printf(" %02X", pid);
+        }
+    }
+    log_file_printf("\n");
+}
+
+static void run_probe(int sock)
+{
+    probe_clear();
+
+    if (sock < 0) {
+        g_probe_state = PROBE_NOLINK;
+        log_file_printf("SONDA: sin adaptador, no se puede sondear\n");
+        return;
+    }
+
+    log_file_printf("=== SONDA DEL COCHE ===\n");
+    g_probe_state = PROBE_RUNNING;
+    g_net_busy = 1;
+    g_net_ui_last = 0;
+
+    probe_status("SONDA: ADAPTADOR");
+    probe_send(sock, "ATE0", 1000);
+    probe_send(sock, "ATL0", 1000);
+    probe_send(sock, "ATS0", 1000);
+    probe_send(sock, "ATH0", 1000);
+    probe_at(sock, "ATI", g_probe_ati, sizeof(g_probe_ati));
+    probe_at(sock, "ATDPN", g_probe_proto, sizeof(g_probe_proto));
+    probe_at(sock, "ATRV", g_probe_vbat, sizeof(g_probe_vbat));
+    {
+        char proto_desc[48];
+        probe_at(sock, "ATDP", proto_desc, sizeof(proto_desc));
+    }
+
+    if (scan_cancelled()) {
+        goto probe_done;
+    }
+
+    probe_status("SONDA: MASCARAS DE PID");
+    g_probe_mask[0] = probe_mask_block(sock, 0x00);
+    if (obd_mask_supports(g_probe_mask[0], 0x20)) {
+        g_probe_mask[1] = probe_mask_block(sock, 0x20);
+        if (obd_mask_supports(g_probe_mask[1], 0x40)) {
+            g_probe_mask[2] = probe_mask_block(sock, 0x40);
+        }
+    }
+    probe_log_supported();
+
+    if (scan_cancelled()) {
+        goto probe_done;
+    }
+
+    /* Cabecera cruda: es la evidencia que hace falta para arreglar el
+     * descubrimiento de modulos en K-line. */
+    probe_status("SONDA: CABECERA");
+    probe_send(sock, "ATH1", 1000);
+    probe_send(sock, "ATS1", 1000);
+    scan_send(sock, "0100", PROBE_PID_MS);
+    if (g_cap_count > 0) {
+        probe_copy(g_probe_header, sizeof(g_probe_header), g_cap[0]);
+    }
+    log_file_printf("PROBE cabecera 0100: '%s'\n", g_probe_header);
+    probe_send(sock, "ATH0", 1000);
+    probe_send(sock, "ATS0", 1000);
+
+    if (scan_cancelled()) {
+        goto probe_done;
+    }
+
+    probe_status("SONDA: VIN");
+    probe_mode09(sock, "0902", "VIN", g_probe_vin, sizeof(g_probe_vin));
+    probe_status("SONDA: CALID");
+    probe_mode09(sock, "0904", "CALID", g_probe_cal, sizeof(g_probe_cal));
+    probe_status("SONDA: CVN");
+    probe_mode09(sock, "0906", "CVN", g_probe_cvn, sizeof(g_probe_cvn));
+    probe_status("SONDA: ECU");
+    probe_mode09(sock, "090A", "ECU", g_probe_ecu, sizeof(g_probe_ecu));
+
+    if (scan_cancelled()) {
+        goto probe_done;
+    }
+
+    probe_status("SONDA: PID UNO A UNO");
+    probe_sweep(sock);
+
+probe_done:
+    /* El dashboard necesita el adaptador como lo dejo el handshake. */
+    probe_send(sock, "ATH0", 800);
+    probe_send(sock, "ATS0", 800);
+    probe_send(sock, "ATE0", 800);
+    probe_send(sock, "ATL0", 800);
+    scan_refresh_proto(sock, "sonda");
+    probe_copy(g_probe_proto, sizeof(g_probe_proto), g_proto);
+
+    log_file_printf("PROBE resumen: %d/%d PID responden, protocolo '%s'\n",
+                    g_probe_ok, g_probe_count, g_probe_proto);
+    log_sync();
+
+    g_probe_state = PROBE_DONE;
+    g_probe_hint[0] = '\0';
+    g_net_busy = 0;
+    g_net_ui_last = 0;
+}
+
+static void draw_probe(void)
+{
+    char txt[80];
+    int max_scroll = g_probe_count - PROBE_VISIBLE;
+
+    if (max_scroll < 0) {
+        max_scroll = 0;
+    }
+    if (g_probe_scroll > max_scroll) {
+        g_probe_scroll = max_scroll;
+    }
+    if (g_probe_scroll < 0) {
+        g_probe_scroll = 0;
+    }
+
+    gfx_text(8, 32, "SONDA DEL COCHE", QV_TEXT, 1);
+
+    if (g_probe_state == PROBE_IDLE) {
+        gfx_text(8, 56, "PULSA X PARA SONDEAR EL COCHE.", QV_TEXT, 1);
+        gfx_text(8, 72, "Solo lectura: modo 01 y modo 09.", QV_DIM, 1);
+        gfx_text(8, 88, "El resultado completo queda en el log.", QV_DIM, 1);
+        return;
+    }
+    if (g_probe_state == PROBE_NOLINK) {
+        gfx_text(8, 56, "SIN ADAPTADOR.", QV_AMBER, 1);
+        gfx_text(8, 72, "TRIANGLE REINTENTA LA CONEXION.", QV_DIM, 1);
+        return;
+    }
+    if (g_probe_state == PROBE_RUNNING) {
+        gfx_text(8, 56, g_probe_hint, QV_AMBER, 1);
+        gfx_text(8, 72, "CIRCLE CANCELA.", QV_DIM, 1);
+        return;
+    }
+
+    /* Adaptador y protocolo. */
+    gfx_text(8, 44, "PROT", QV_DIM, 1);
+    gfx_text(40, 44, g_probe_proto[0] ? g_probe_proto : "-", QV_TEXT, 1);
+    gfx_text(96, 44, "BAT", QV_DIM, 1);
+    gfx_text(122, 44, g_probe_vbat[0] ? g_probe_vbat : "-", QV_TEXT, 1);
+    gfx_text(176, 44, "ADAPTADOR", QV_DIM, 1);
+    gfx_text(238, 44, g_probe_ati[0] ? g_probe_ati : "-", QV_TEXT, 1);
+
+    snprintf(txt, sizeof(txt), "MASC %08X %08X %08X",
+             (unsigned)g_probe_mask[0], (unsigned)g_probe_mask[1],
+             (unsigned)g_probe_mask[2]);
+    gfx_text(8, 56, txt, QV_DIM, 1);
+
+    snprintf(txt, sizeof(txt), "PID %d/%d", g_probe_ok, g_probe_count);
+    gfx_text(8, 68, txt, g_probe_ok > 0 ? QV_OK : QV_AMBER, 1);
+    if (g_probe_vin[0] != '\0') {
+        snprintf(txt, sizeof(txt), "VIN %s", g_probe_vin);
+        gfx_text(96, 68, txt, QV_TEXT, 1);
+    }
+
+    gfx_rect(8.0f, 80.0f, GFX_W - 16.0f, 1.0f, QV_TRACK);
+    gfx_text(10, 84, "PID  DATO", QV_DIM, 1);
+    gfx_text_right(400, 84, "RESPUESTA", QV_DIM, 1);
+
+    for (int i = 0; i < PROBE_VISIBLE; i++) {
+        int idx = g_probe_scroll + i;
+        uint32_t color;
+        if (idx >= g_probe_count) {
+            break;
+        }
+        if (g_probe[idx].answered) {
+            color = QV_OK;
+        } else if (g_probe[idx].no_data) {
+            color = QV_AMBER;
+        } else {
+            color = QV_DIM;
+        }
+        int y = 96 + i * 13;
+        gfx_text(10, y, g_probe[idx].label, QV_TEXT, 1);
+        gfx_text_right(400, y, g_probe[idx].value, color, 1);
+    }
+
+    if (g_probe_ecu[0] != '\0') {
+        snprintf(txt, sizeof(txt), "ECU %s", g_probe_ecu);
+        gfx_text(8, 258, txt, QV_DIM, 1);
+    }
+
+    if (max_scroll > 0) {
+        float tx = GFX_W - 8.0f;
+        float ty = 92.0f;
+        float th = 160.0f;
+        float bh;
+        gfx_rect(tx, ty, 2.0f, th, QV_TRACK);
+        bh = th * (float)PROBE_VISIBLE / (float)g_probe_count;
+        gfx_rect(tx, ty + (th - bh) * (float)g_probe_scroll /
+                     (float)max_scroll, 2.0f, bh, QV_DIM);
+    }
+}
+
 static void draw_modules(void)
 {
     /* En la lista de resultados la cabecera la forma la linea de
@@ -6955,6 +7560,8 @@ static void draw_screen(uint32_t now, int requests, int data_count,
         draw_modules();
     } else if (g_mode == MODE_SNIFFER) {
         draw_sniffer();
+    } else if (g_mode == MODE_PROBE) {
+        draw_probe();
     } else {
         draw_info();
     }
@@ -7095,6 +7702,25 @@ static int handle_mode_input(unsigned int pressed)
         if (pressed & PSP_CTRL_DOWN) {
             if (g_snif_view > 0) {
                 g_snif_view--;
+            }
+            changed = 1;
+        }
+    }
+
+    if (g_mode == MODE_PROBE && !g_settings_open) {
+        if (pressed & PSP_CTRL_CROSS) {
+            g_probe_request = 1;
+            changed = 1;
+        }
+        if (pressed & PSP_CTRL_UP) {
+            if (g_probe_scroll > 0) {
+                g_probe_scroll--;
+            }
+            changed = 1;
+        }
+        if (pressed & PSP_CTRL_DOWN) {
+            if (g_probe_scroll + 1 < g_probe_count) {
+                g_probe_scroll++;
             }
             changed = 1;
         }
@@ -7626,6 +8252,23 @@ static void run_dashboard(Target *targets, int target_count)
             continue;
         }
 
+        if (g_probe_request) {
+            g_probe_request = 0;
+            /* La sonda usa el socket de forma bloqueante: no debe
+             * solaparse con una peticion en vuelo. */
+            if (rx.active) {
+                obd_sched_end(&g_sched, rx_idx, now_ms(), 0);
+                if (sock >= 0) {
+                    elm_flush_input(sock);
+                }
+                memset(&rx, 0, sizeof(rx));
+            }
+            run_probe(sock);
+            now = now_ms();
+            last_status = now;
+            continue;
+        }
+
         if (g_demo) {
             demo_update(now);
         }
@@ -7904,6 +8547,12 @@ int main(void)
 {
     setup_exit_callback();
 
+    /* El EBOOT puede estar instalado en cualquier carpeta, pero los
+     * datos (log, ajustes, host.txt) van siempre a LOG_DIR. Si esa
+     * carpeta no existe no se escribia nada y nadie avisaba: se crea. */
+    sceIoMkdir("ms0:/PSP/SAVEDATA", 0777);   /* el firmware la crea */
+    sceIoMkdir(LOG_DIR, 0777);
+
     /* Solo archivo: la pantalla grafica es lo primero que se ve. */
     log_open();
     log_file_printf("PSP Torque - fase 2\n");
@@ -7912,6 +8561,7 @@ int main(void)
 
     /* Paleta y estado inicial, aun sin GU. */
     settings_load();
+    proto_load();
     obd_store_init(&g_store);
     boost_init(&g_boost, PROFILE_BARO_FALLBACK_KPA);
 

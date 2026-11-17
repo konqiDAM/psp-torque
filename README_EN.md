@@ -74,7 +74,7 @@ whatever your ECU actually supports.
 
 ### Pointing the app at your adapter
 
-The app reads `ms0:/PSP/GAME/PSPTorqueOBD/host.txt`. If that file is missing,
+The app reads `ms0:/PSP/SAVEDATA/PSPTORQUE/host.txt`. If that file is missing,
 it falls back to `192.168.0.10:35000`.
 
 ```
@@ -91,7 +91,8 @@ You can also change the IP and port from the in-app menu.
 
    ```
    ms0:/PSP/GAME/PSPTorqueOBD/EBOOT.PBP
-   ms0:/PSP/GAME/PSPTorqueOBD/host.txt      (optional)
+   ms0:/PSP/SAVEDATA/PSPTORQUE/              (data folder: created by the app)
+   ms0:/PSP/SAVEDATA/PSPTORQUE/host.txt      (optional)
    ```
 
 2. Power on the ELM327 and turn the **ignition on** with the engine **off**.
@@ -141,7 +142,7 @@ To quit: `START` → `SALIR` → `X`.
 `ANIMACION`, `MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`, `RPM MAX`,
 `UNIDADES` (metric/imperial), `TURBO AUTO`, `BOOST MAX`, `FPS` and `SALIR`.
 
-They are stored in `ms0:/PSP/GAME/PSPTorqueOBD/settings.txt` and applied
+They are stored in `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` and applied
 immediately.
 
 ## Themes

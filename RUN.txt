@@ -114,7 +114,7 @@ AJUSTES DE TEMA
   ARRIBA/ABAJO elige la opcion; IZQ/DER cambia el valor.
   CIRCLE borra el maximo de turbo aprendido.
   X guarda y cierra el menu. Se guarda en:
-    ms0:/PSP/GAME/PSPTorqueOBD/settings.txt
+    ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt
   Los ajustes se aplican al instante y se conservan al reiniciar.
 
 EDITOR DE LA VISTA
@@ -193,7 +193,7 @@ INFORMACION DE PARAMETROS
 
   SONIDO PROPIO (chime.wav)
     Copia el archivo en la misma carpeta que el EBOOT:
-      ms0:/PSP/GAME/PSPTorqueOBD/chime.wav
+      ms0:/PSP/SAVEDATA/PSPTORQUE/chime.wav
     Formato recomendado: WAV PCM 16 bits, mono o estereo, 44100 Hz.
     La app lo convierte sola si esta a otra frecuencia y lo repite
     mientras estes por encima de 100 km/h, dejando 0,90 s de pausa
@@ -292,7 +292,7 @@ SIN ADAPTADOR
 
 RESULTADO
   Un archivo de log por sesion, sin borrar los anteriores:
-    ms0:/PSP/GAME/PSPTorqueOBD/phase1_AAAAMMDD_HHMMSS.log
+    ms0:/PSP/SAVEDATA/PSPTORQUE/phase1_AAAAMMDD_HHMMSS.log
   Si el reloj de la PSP no es valido, usa numeracion correlativa:
     phase1_001.log, phase1_002.log, ...
 

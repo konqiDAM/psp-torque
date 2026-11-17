@@ -271,11 +271,13 @@ static void build_play_buffer(void)
 {
     static const char *paths[] = {
         "chime.wav",
+        "ms0:/PSP/SAVEDATA/PSPTORQUE/chime.wav",
+        "ms0:/PSP/SAVEDATA/PSPTORQUE/CHIME.WAV",
         "ms0:/PSP/GAME/PSPTorqueOBD/chime.wav",
         "ms0:/PSP/GAME/PSPTorqueOBD/CHIME.WAV"
     };
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < (int)(sizeof(paths) / sizeof(paths[0])); i++) {
         if (load_wav(paths[i])) {
             return;
         }

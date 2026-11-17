@@ -75,7 +75,7 @@ capacidades reales de cualquier ECU.
 
 ### Configurar el destino del adaptador
 
-La app lee `ms0:/PSP/GAME/PSPTorqueOBD/host.txt`. Si el archivo no existe,
+La app lee `ms0:/PSP/SAVEDATA/PSPTORQUE/host.txt`. Si el archivo no existe,
 usa `192.168.0.10:35000`.
 
 ```
@@ -92,7 +92,8 @@ También puedes cambiar IP y puerto desde el propio menú de la app.
 
    ```
    ms0:/PSP/GAME/PSPTorqueOBD/EBOOT.PBP
-   ms0:/PSP/GAME/PSPTorqueOBD/host.txt      (opcional)
+   ms0:/PSP/SAVEDATA/PSPTORQUE/              (datos: la app la crea)
+   ms0:/PSP/SAVEDATA/PSPTORQUE/host.txt      (opcional)
    ```
 
 2. Enciende el ELM327, pon el **contacto** con el motor **parado**.
@@ -142,7 +143,7 @@ Para salir de la aplicación: `START` → `SALIR` → `X`.
 `ANIMACION`, `MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`, `RPM MAX`,
 `UNIDADES` (métrico/imperial), `TURBO AUTO`, `BOOST MAX`, `FPS` y `SALIR`.
 
-Se guardan en `ms0:/PSP/GAME/PSPTorqueOBD/settings.txt` y se aplican al
+Se guardan en `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` y se aplican al
 instante.
 
 ## Temas
