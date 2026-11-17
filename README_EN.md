@@ -47,6 +47,10 @@ whatever your ECU actually supports.
   `TEXTO` (text) or `OCULTO` (hidden), and you pick which value it shows.
 - **ECU module discovery** (OBD‑II and UDS identification) and a **CAN bus
   sniffer** that captures the whole session traffic.
+- **Vehicle probe** (`SONDA DEL COCHE`): a diagnostic screen that reads the
+  adapter and ECU identity, the PID masks, the raw header and then asks for
+  every PID once. It tells you what an unknown car can actually deliver
+  instead of tuning the scheduler blind.
 - **Demo mode** with a ~130 s synthetic driving profile, so you can try the
   interface without a car.
 - **Per-session log** on the Memory Stick, including performance metrics

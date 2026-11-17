@@ -81,6 +81,10 @@ CONTROLES
   ARRIBA / ABAJO       : desplazar la vista
   L / R                : cambiar de pantalla
   (todo el trafico CAN se guarda en el log de la sesion)
+  En la pantalla SONDA DEL COCHE:
+  X                    : sondear el coche (identidad, mascaras, VIN y cada PID)
+  ARRIBA / ABAJO       : desplazar la lista de resultados
+  CIRCLE               : cancelar una sonda en curso
 
   No hay limite de tiempo: el dashboard funciona hasta que elijas
   SALIR dentro del menu (START > SALIR > X).
@@ -282,6 +286,32 @@ PASOS
      resumen de texto; pulsa START otra vez para salir.
   9. Activa el modo USB y avisa para leer el log.
 
+SONDA DEL COCHE
+  La octava pestana (L/R hasta SONDA) sirve para saber que puede dar
+  un coche que no es el de referencia. Pulsa X y la app hace, en orden:
+    1. Identidad: ATI, ATDPN, ATDP y ATRV (adaptador, protocolo, tension).
+    2. Mascaras 0100/0120/0140 y la lista de PID que declara la centralita.
+    3. Una lectura con cabeceras (ATH1) para guardar la cabecera cruda.
+    4. Modo 09: VIN, CalID, CVN y nombre de la ECU, si el coche lo soporta.
+    5. Un PID de cada vez, para ver cual contesta y cual no.
+  Tarda entre 30 y 60 segundos en un coche K-line. Todo queda en el log
+  con el prefijo PROBE. La pantalla muestra protocolo, tension, adaptador,
+  las tres mascaras y la tabla de PID con su respuesta.
+
+  PROTOCOLO FORZADO
+    Si el adaptador no encuentra el protocolo solo, se puede fijar a mano:
+    crea el archivo ms0:/PSP/SAVEDATA/PSPTORQUE/protocol.txt con un numero:
+      3 = ISO 9141-2      5 = KWP2000 (init rapido)
+      6 = CAN 11 bits/500 7 = CAN 29 bits/500
+    Sin ese archivo la app usa el automatico (ATSP0). El protocolo que
+    acaba usando el adaptador queda en el log como ATDPN.
+
+  PRIMERA CONEXION
+    En un coche K-line la primera lectura puede tardar hasta 20 segundos:
+    el adaptador esta buscando el protocolo. Es espera normal, no un
+    cuelgue. Si se corta esa busqueda, el ELM327 se queda en STOPPED y
+    luego no contesta nada hasta reiniciarlo.
+
 SIN ADAPTADOR
   Si el ELM327 no esta encendido o no se conecta, la app muestra
   igualmente el dashboard grafico con todos los valores en N/D y el
@@ -298,6 +328,8 @@ RESULTADO
 
 QUE MIRAR
   - "mascara 0100", "mascara 0120" y "mascara 0140": que PIDs existen.
+  - Lineas "PROBE ...": resultado de la sonda (adaptador, protocolo,
+    mascaras, cabecera cruda, VIN y la respuesta de cada PID).
   - "BARO: ..." al final: PID 0x33, KEY-ON o fallback EST.
   - Lineas "t=... rpm=... map=... boost=...".
   - "RESULTADO: OK" si hubo datos sin cortes, o "RESULTADO: OK (N cortes)"

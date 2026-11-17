@@ -224,6 +224,45 @@ Criterios de aceptacion:
 - [ ] El RPM se refresca a >= 4,5 Hz en el coche y no quedan STOPPED con
       el hueco calibrado.
 
+## Fase 2.9 - Soporte K-line (FASE K)
+
+Objetivo: que la app sea util en un coche que no es el de referencia. El
+segundo coche es un Mazda MX-5 NB2, ISO 9141-2, con un ELM327 v2.3: 383 ms
+de ida y vuelta y ~2 req/s, frente a los 50-67 ms y 12-14 req/s del MiTo.
+Lo medido esta en `docs/COMPATIBILIDAD_MX5_NB2.md` y en `ANALISIS_LOGS.md`.
+
+- [x] **K0 - Sonda del coche (`SONDA DEL COCHE`).** Octava pestana, solo
+  lectura. Lee identidad del adaptador y de la ECU, mascaras con la lista de
+  PID declarados, cabecera cruda y despues pide cada PID una vez para decir
+  cuales contesta el coche. Todo al log.
+- [x] **K1 - Esperar la busqueda de protocolo.** Mientras el adaptador diga
+  `SEARCHING` se le espera hasta 20 s. Antes se abortaba a los 3 s y el
+  ELM327 se quedaba en `STOPPED` el resto de la sesion (876 `STOPPED` y cero
+  `NO DATA` en `phase1_001`). Ademas `protocol.txt` permite forzar el
+  protocolo (3 = ISO 9141-2, 5 = KWP init rapido, 6/7 = CAN).
+- [x] **K1b - Log que no se pierde.** Se escribe en la tarjeta cada segundo y
+  se sincroniza cada 2 s. Antes, salir sin pasar por el menu dejaba el log
+  con las lineas de arranque (235 bytes de una sesion entera).
+- [ ] **K2 - Reparto de periodos por capacidad medida.** Los periodos base
+  suponen 12-14 req/s; el K-line da 1,9. Medido: RPM cada 4,4 s. El
+  planificador debe partir de la capacidad del enlace (medida o por clase de
+  protocolo) y repartir: pocos PID, rapidos, y los lentos fuera de pantalla.
+  Criterio: con el motor al ralenti y en marcha, RPM a >= 1 Hz y los cuatro
+  valores de la pantalla activa a >= 0,5 Hz, sin saturar (`test_demand_*`).
+- [ ] **K3 - Panel GENERAL sin MAP.** En un atmosferico sin `0B` ni `33` el
+  indicador central de boost es `N/D` permanente. Sustituirlo por MAF (g/s)
+  y carga (%), y desactivar el aprendizaje de `TURBO AUTO` cuando no hay MAP.
+  Criterio: la pantalla GENERAL no muestra ningun `N/D` fijo.
+- [ ] **K4 - Descubrimiento de modulos en K-line.** `obd_disc_parse_line`
+  solo reconoce cabeceras CAN (3 u 8 digitos hex). La cabecera real de este
+  coche es `48 6B 10` (tres bytes, seis digitos). Criterio: test unitario con
+  la linea `48 6B 10 41 00 BE 1F B8 11 AA` que devuelve la mascara
+  `BE1FB811`, y la pantalla MODULOS encuentra la centralita en K-line.
+- [ ] **K5 - Estabilidad del enlace.** Dos caidas en 5 minutos en
+  `phase1_003` (a los 157 s y a los 233 s), la segunda sin recuperar. Hay que
+  separar adaptador, WiFi de la PSP y coche, y decidir si el reintento
+  necesita algo mas que los tres intentos actuales.
+
 ## Fase 3 — Parámetros específicos Alfa Romeo (investigación)
 
 Tareas:
@@ -250,6 +289,23 @@ Criterios de aceptación:
 - Empaquetado (`EBOOT.PBP`, icono, manual).
 - Pruebas de uso real: montaje, legibilidad con sol, guantes, acompañante.
 
+## Fase 5 - Diagnostico a bordo (pantalla FALLOS)
+
+Objetivo: que la app diga por que se ha encendido el testigo de averia. Hoy
+solo muestra datos vivos y PID `21` (distancia con MIL); no lee codigos.
+
+- [ ] Leer PID `01` (estado del testigo MIL y numero de codigos guardados).
+- [ ] Modo `03`: codigos guardados, con su descripcion por tabla local.
+- [ ] Modo `07`: codigos pendientes. Modo `0A`: codigos permanentes.
+- [ ] Modo `02`: freeze frame del primer codigo (foto de los datos en el
+  momento del fallo).
+- [ ] Modo `06`: resultados de los monitores a bordo (pasa/falla).
+- [ ] Todo solo lectura. No se enviara nunca modo `04` (borrar) ni `08`.
+
+Criterio de cierre: en un coche con el testigo encendido, la pantalla muestra
+el mismo codigo que un lector comercial, y sin codigos lo dice explicitamente
+(en vez de una lista vacia).
+
 ## Fuera de alcance
 
 - Escritura/codificación en la ECU.
@@ -271,6 +327,9 @@ Criterios de aceptación:
 | Memory Stick lenta/extraída | Bajo | Flush periódico, cierre seguro |
 | Interpretar boost/Torque mal | Alto | MAP/baro explícitos, `EST`, no inventar |
 | Fatiga/seguridad al conducir | Alto | Montaje, acompañante, solo lectura |
+| Enlace K-line de ~2 req/s | Alto | Reparto por capacidad (K2), pocos PID en pantalla |
+| Cabeceras de 3 bytes en K-line | Medio | Parser de descubrimiento por protocolo (K4) |
+| Clon ELM327 v2.3 con 383 ms | Medio | Documentar el techo; recomendar adaptador mejor |
 
 ## Decisiones pendientes
 
@@ -280,3 +339,9 @@ Criterios de aceptación:
    y `0x5E` (caudal).
 4. Confirmar el redline real y los umbrales que quiere el usuario.
 5. Confirmar si se usará el plugin WPA2 de ARK4 o un puente.
+6. K2: periodos por clase de protocolo fijos o medidos en caliente con el rtt.
+7. Pantalla FALLOS: pestana propia o dentro de DIAG.
+8. MODULOS y SNIFFER en un coche K-line: ocultarlas, avisar o adaptarlas.
+9. Panel GENERAL: que se adapte solo al coche (sin MAP -> MAF/carga) o que sea
+   un perfil elegible.
+10. Si el soporte K-line se hace generico (cualquier coche) o solo MX-5.

@@ -47,6 +47,10 @@ capacidades reales de cualquier ECU.
   `OCULTO`, y se elige qué dato muestra.
 - **Descubrimiento de centralitas** (OBD‑II y UDS de identificación) y
   **sniffer de bus CAN** para capturar el tráfico completo de la sesión.
+- **Sonda del coche** (`SONDA DEL COCHE`): pantalla de diagnóstico que lee
+  la identidad del adaptador y de la ECU, las máscaras de PID, la cabecera
+  cruda y prueba cada PID uno a uno. Sirve para saber qué puede dar un coche
+  que no es el de referencia, sin tocar el planificador a ciegas.
 - **Modo demo** con un perfil de conducción simulado de ~130 s, para probar la
   interfaz sin coche.
 - **Log por sesión** en la Memory Stick, con métricas de rendimiento
