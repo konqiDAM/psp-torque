@@ -320,10 +320,16 @@ the layout per car, and let the app work out which car it is in. Full design in
 - [ ] **U3 - Preferences v2.** `version=2` line, `start` (a screen name or `last`), `last`,
   `hidden`, and per-vehicle keys `v.<id>.<key>` for layout and tacho. Existing keys keep
   working as global defaults.
-- [ ] **U4 - Vehicle profiles.** A table in `src/core/vehicle.c` with the MiTo and the
-  MX-5 plus two generic fallbacks, matched on protocol and masks, overridable by hand, and
-  logged as one line per session with the evidence. The centre gauge follows capability:
-  BOOST, MAF or LOAD.
+- [x] **U4 - Vehicle profiles.** Done in `fase2.45` for detection and the numbers: the
+  table lives in `src/core/vehicle.c` with the MiTo, the MX-5 NB2 and a generic CAN and a
+  generic K-line row, matched on `ATDPN` plus the three masks, overridable with
+  `profile=` in `settings.txt`, and logged once per session with the evidence. On the MX-5
+  the tacho is 8000 with the red zone at 7000 and the cut at 7200; the MiTo and any
+  unrecognised car keep exactly what they had. Tests in `tests/test_vehicle.c`.
+- [ ] **U4b - Centre gauge and layout from the profile.** The table already names the
+  centre gauge (BOOST / MAF / LOAD) but the renderer still always draws boost, so the
+  MX-5 centre reads `N/D`. Next: draw MAF or LOAD there when that is what the car has, and
+  give each profile its own default slot layout.
 - [ ] **U5 - New screens in both languages.** Route the SONDA labels (and anything added
   from here) through `tr()` instead of literals, so the screen follows the language setting like the rest.
 

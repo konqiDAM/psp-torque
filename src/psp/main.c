@@ -45,6 +45,7 @@
 #include "obd/samples.h"
 #include "obd/scheduler.h"
 #include "obd/smooth.h"
+#include "obd/vehicle.h"
 
 #include "gfx.h"
 #include "audio.h"
@@ -75,7 +76,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.44 2026-11-17 FASE U1+U2 barra de conduccion, selector de pantallas (SELECT) y arranque en la ultima"
+#define BUILD_TAG "fase2.45 2026-11-18 FASE U4 perfil de coche: MX-5 NB2 con tacometro 8000, rojo 7000 y corte 7200"
 #define CMD_TIMEOUT_MS 500
 /* Si el adaptador ha demostrado que envia el prompt '>', hay que esperarlo
  * antes de mandar el siguiente comando. El ELM327 hace tareas internas
@@ -419,10 +420,11 @@ typedef struct {
     int chime_gap;  /* fijo 9 decimas = 0,90 s; sin ajuste */
     int show_fps;   /* 1 = mostrar FPS en pantalla */
     int debug;      /* 1 = panel de diagnostico de rendimiento */
+    char profile[24]; /* perfil forzado (vehicle.h); vacio = autodetectar */
 } app_settings;
 
 static app_settings g_cfg = { 0, 0, 0, 1, 1, 0, 1, 0,
-                              4000, 7000, 0, 1, 0, 15, 100, 9, 1, 0 };
+                              4000, 7000, 0, 1, 0, 15, 100, 9, 1, 0, "" };
 
 /* FASE F1: hueco minimo entre el fin de una respuesta y el envio del
  * siguiente comando al ELM327. Medido: con 0 ms el clon retrasa su
@@ -439,8 +441,16 @@ static float tach_max_rpm(void)
     return (float)g_cfg.rpm_max;
 }
 
+/* Lo que aporta el perfil del coche (FASE U4): si esta a 0 se usa el
+ * criterio de siempre, para que un coche sin perfil no cambie nada. */
+static int g_profile_redline = 0;   /* inicio de la zona roja */
+static int g_profile_cut = 0;       /* corte de inyeccion */
+
 static float redline_rpm(void)
 {
+    if (g_profile_redline > 0 && g_profile_redline < g_cfg.rpm_max) {
+        return (float)g_profile_redline;
+    }
     /* Zona roja automatica: 500 rpm antes del fondo de escala. Con el
      * ajuste por defecto (7000) queda en 6500, como el corte habitual. */
     int r = g_cfg.rpm_max - 500;
@@ -1067,6 +1077,10 @@ static void settings_load(void)
                            strcmp(key, "fps_show") == 0 ||
                            strcmp(key, "show_fps") == 0) {
                     g_cfg.show_fps = atoi(val) ? 1 : 0;
+                } else if (strcmp(key, "profile") == 0 ||
+                           strcmp(key, "perfil") == 0 ||
+                           strcmp(key, "vehicle") == 0) {
+                    snprintf(g_cfg.profile, sizeof(g_cfg.profile), "%.23s", val);
                 } else if (strcmp(key, "last") == 0 ||
                            strcmp(key, "pantalla") == 0) {
                     int v = atoi(val);
@@ -1232,7 +1246,8 @@ static void settings_save(void)
                      "fps_show=%d\n"
                      "debug=%d\n"
                      "elm_gap=%d\n"
-                     "last=%d\n",
+                     "last=%d\n"
+                     "profile=%s\n",
                      g_cfg.theme, g_cfg.color, g_cfg.lang, g_cfg.contrast, g_cfg.anim,
                      g_cfg.fast, g_cfg.peak_hold,
                      g_cfg.smooth, g_cfg.shift_rpm, g_cfg.rpm_max,
@@ -1246,7 +1261,8 @@ static void settings_save(void)
                      g_slot_item[5], g_slot_style[5],
                      g_tel_item[0], g_tel_item[1], g_tel_item[2],
                      g_tel_item[3], g_tel_item[4],
-                     g_cfg.show_fps, g_cfg.debug, g_elm_min_gap_ms, g_mode);
+                     g_cfg.show_fps, g_cfg.debug, g_elm_min_gap_ms, g_mode,
+                     g_cfg.profile);
     if (n > (int)sizeof(buf) - 1) {
         n = (int)sizeof(buf) - 1;
     }
@@ -2476,6 +2492,45 @@ static void apply_support_masks(void)
     }
 }
 
+/* FASE U4: que coche es. Se decide una vez por conexion, con la evidencia
+ * que ya tenemos (ATDPN y las tres mascaras), y se escribe en el log: sin
+ * esa linea, un cuadro equivocado no se puede explicar despues. */
+static int g_vehicle_seen = 0;
+
+static void vehicle_detect(void)
+{
+    if (g_vehicle_seen) {
+        return;
+    }
+    g_vehicle_seen = 1;
+
+    int exact = 0;
+    int proto = obd_vehicle_proto_class(g_proto);
+    const obd_vehicle_profile *p = obd_vehicle_match(
+        proto, g_mask1, g_mask2, g_mask3, g_cfg.profile, &exact);
+
+    if (p == NULL) {
+        log_file_printf("Vehiculo: sin perfil (proto %s, mascaras %08X/%08X/%08X)\n",
+                        g_proto, g_mask1, g_mask2, g_mask3);
+        return;
+    }
+
+    /* Un perfil generico no toca nada: el tacometro y la zona roja se
+     * quedan como los tenga el usuario, que es lo que habia antes. */
+    if (!p->generic) {
+        g_cfg.rpm_max = p->rpm_max;
+        g_profile_redline = p->redline;
+        g_profile_cut = p->fuel_cut;
+    }
+
+    log_file_printf("Vehiculo: %s (%s, proto %s, mascaras %08X/%08X/%08X)"
+                    " tacometro=%d rojo=%d corte=%d\n",
+                    p->name,
+                    g_cfg.profile[0] ? "forzado" : (exact ? "detectado" : "generico"),
+                    g_proto, g_mask1, g_mask2, g_mask3,
+                    g_cfg.rpm_max, p->redline, p->fuel_cut);
+}
+
 /* ------------------------------------------------------------------ */
 /* Reparto del ancho de banda por pantalla (FASE F3).                  */
 /* ------------------------------------------------------------------ */
@@ -2651,6 +2706,7 @@ static void build_scheduler(void)
     }
 
     apply_support_masks();
+    vehicle_detect();
 
     log_file_printf("Acelerador: 0x%02X (%s), pedal=%s\n",
                     g_thr_pid, g_thr_label,
@@ -2681,6 +2737,7 @@ static int connect_network_and_elm(Target *targets, int *target_count,
     g_mask1 = 0;
     g_mask2 = 0;
     g_mask3 = 0;
+    g_vehicle_seen = 0;
     g_thr_pid = 0x11;
     g_thr_label = "MARIPOSA";
     g_oil_supported = 0;
@@ -7276,8 +7333,11 @@ static void draw_theme_fx(const dash_data *d, uint32_t now)
             gfx_rect(402.0f, 54.0f, gw, 3.0f, QV_CYAN);
         }
 
-        if (d->rpm_valid && d->rpm_val >= redline_rpm() - 150.0f &&
-            ((now / 140u) & 1u)) {
+        /* Con perfil, el aviso salta al acercarse al corte real; sin el,
+         * 150 rpm antes de la zona roja como siempre. */
+        float warn_rpm = g_profile_cut > 0 ? (float)g_profile_cut - 100.0f
+                                          : redline_rpm() - 150.0f;
+        if (d->rpm_valid && d->rpm_val >= warn_rpm && ((now / 140u) & 1u)) {
             gfx_border(0, 0, (float)GFX_W, (float)GFX_H, 2.0f, QV_RED);
         }
     }

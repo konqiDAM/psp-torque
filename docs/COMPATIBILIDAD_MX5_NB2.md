@@ -94,6 +94,31 @@ behaviour, not a fault.
 Watch item: 53 °C intake air at idle is high (heat soak in the engine bay). Worth
 confirming it falls while driving before treating it as a bad reading.
 
+## 3b. Vehicle profile
+
+Since `fase2.45` the app recognises the car on connect and applies its numbers, so the
+MX-5 no longer inherits the MiTo's tacho. The evidence is what the app already reads:
+`ATDPN` plus the three masks. The session log carries exactly one line:
+
+```
+Vehiculo: Mazda MX-5 NB2 (detectado, proto A3, mascaras BE1FB811/80000000/--------) tacometro=8000 rojo=7000 corte=7200
+```
+
+| Profile key | MX-5 NB2 | Where it comes from |
+|---|---|---|
+| gauge scale | 8000 rpm | the needle keeps climbing past 7000; the useful band ends around 7500 |
+| red zone | 7000 rpm | owner's decision, and it matches the car's own tacho |
+| fuel cut | 7200 rpm | owner's decision; used for the "about to cut" warning |
+| centre gauge | MAF | no `0B`, no `33`: boost cannot exist here, MAF can |
+
+Detection is a mask match on `BE1FB811` with the protocol in the K-line class, so it does
+not depend on the probe being run. `profile=MAZDA_MX5_NB2` in `settings.txt` forces it,
+and the log then says `forzado`. On any car without a matching profile nothing changes:
+the tacho and red zone stay as the person set them.
+
+Still open in `src/core/vehicle.c`: the centre gauge switch (the field is in the table,
+the rendering is not wired yet) and a per-vehicle default layout.
+
 ## 4. Design consequences
 
 1. **`BOOST` cannot exist on this car.** `BOOST = MAP − barometric` and neither `0B`

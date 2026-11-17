@@ -14,6 +14,7 @@ void test_discovery(void);
 void test_smooth(void);
 void test_set_period(void);
 void test_forced_set(void);
+void test_vehicle(void);
 
 int g_failures = 0;
 
@@ -137,6 +138,7 @@ int main(void)
     test_smooth();
     test_set_period();
     test_forced_set();
+    test_vehicle();
 
     if (g_failures != 0) {
         printf("%d comprobaciones fallidas\n", g_failures);
