@@ -147,10 +147,17 @@ typedef struct {
 } obd_vehicle_profile;
 ```
 
-Initial rows: `ALFA_MITO_QV_2010` (proto CAN, masks `BE3EB811`/`80022001`/`C0C00000`,
-centre BOOST), `MAZDA_MX5_NB2` (proto 3, masks `BE1FB811`/`80000000`/`0`, centre MAF),
-and two fallbacks `GENERIC_CAN` and `GENERIC_KLINE`, which match anything and derive the
-centre from capability rather than identity.
+Initial rows:
+
+| id | protocol | masks | gauge scale | red zone | fuel cut | centre |
+|---|---|---|---|---|---|---|
+| `ALFA_MITO_QV_2010` | CAN | `BE3EB811`/`80022001`/`C0C00000` | 7000 | 6500 | — | BOOST |
+| `MAZDA_MX5_NB2` | 3 | `BE1FB811`/`80000000`/— | 8000 | 7000 | 7200 | MAF |
+| `GENERIC_CAN` | any CAN | — | 7000 | 6500 | — | from capability |
+| `GENERIC_KLINE` | any K-line | — | 7000 | 6500 | — | from capability |
+
+The two generic rows match anything and derive the centre from the declared PIDs rather
+than from identity.
 
 ### 5.3 Matching
 
@@ -204,12 +211,22 @@ preferences, not the car's.
 - An MX-5 session never enables the MiTo sign decoding (mask-gated, tested).
 - MiTo regression: everything the MiTo did before still works, with the new bar.
 
-## 8. Decisions needed
+## 8. Decisions
+
+Resolved on 2026-11-17:
+
+2. **Start screen: `last`.** The app reopens on the screen it was left on, falling back
+   to GENERAL when that screen no longer exists for the current car.
+3. **Unavailable screens are greyed in the picker with the reason**, and absent from the
+   top bar. Silent removal teaches nothing.
+4. **MX-5: red zone at 7000, fuel cut at 7200.** The gauge therefore needs a full scale
+   above the cut — 8000 proposed — because the current code derives the red zone as
+   `rpm_max - 500`, which cannot express "red at 7000, cut at 7200". The red zone becomes
+   an explicit per-profile value instead of a derived one, defaulting to `rpm_max - 500`
+   so nothing changes for the MiTo. The MiTo profile keeps its current 7000 scale and
+   6500 red zone, and gets no cut value.
+
+Still open:
 
 1. **Top bar with four driving tabs plus the picker** — approve, or keep all eight visible
-   and use SELECT only as a fast switcher?
-2. **Start screen default**: `last` (resume where you left it) or always GENERAL?
-3. **Unavailable screens**: hidden from the picker, or shown greyed with the reason?
-   (Recommendation: greyed in the picker, absent from the bar.)
-4. **Tacho/redline defaults**: use the values above for the two cars, or leave both at
-   the current 7000/6500 until real hard-cut numbers are confirmed?
+   and use SELECT only as a fast switcher? Awaiting the screen-by-screen review.
