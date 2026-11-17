@@ -1,87 +1,85 @@
-# Pruebas pendientes en hardware
+# Pending hardware tests
 
-Lista viva. Cada prueba dice que se quiere saber, como se hace, que hay que
-mirar en el log y cuando se da por buena. Las que necesitan coche se hacen
-con el motor al ralenti salvo que se diga otra cosa.
+A living list. Each test says what we want to learn, how to run it, what to look for in
+the log, and when it counts as done. Tests that need the car are done at idle unless
+stated otherwise.
 
-## Hechas
+## Done
 
-| # | Prueba | Resultado |
+| # | Test | Result |
 |---|---|---|
-| T1 | Sonda completa en el MX-5 | OK: `A3` ISO 9141-2, 13/18 PID, cabecera `48 6B 10` |
-| T2 | Busqueda de protocolo con espera de 20 s | OK: `0100` respondio en 4315 ms |
-| T3 | Log escrito a la tarjeta cada segundo | OK en `phase1_003` (317 s completos) |
+| T1 | Full probe on the MX-5 | OK: `A3` ISO 9141-2, 13/18 PIDs, header `48 6B 10` |
+| T2 | Protocol search with the 20 s wait | OK: `0100` answered at 4315 ms |
+| T3 | Log written to the card every second | OK in `phase1_003` (317 s complete) |
 
-## Pendientes
+## Pending
 
-### T4 - Caidas del enlace (prioridad alta)
+### T4 — Link drops (high priority)
 
-**Que se quiere saber:** si las dos caidas de `phase1_003` son del adaptador,
-del WiFi de la PSP o del coche, y si la reconexion automatica basta.
+**What we want to know:** whether the two drops in `phase1_003` are the adapter, the
+PSP's WiFi or the car, and whether the automatic reconnect is enough.
 
-**Como:** 15 minutos con el motor en marcha, circulando o al ralenti, sin
-tocar la app. Anotar la hora real de cualquier corte visible en pantalla.
+**How:** fifteen minutes with the engine running, driving or idling, without touching
+the app. Note the real-world time of anything visible on screen.
 
-**Que mirar en el log:** lineas `t=` con `(offline)`, `Auto-reintento N/3`,
-el `rtt` justo antes (383 -> 500 ms es la firma de la primera caida), y
-cuantas reconexiones hicieron falta.
+**What to look for in the log:** `t=` lines with `(offline)`, `Auto-reintento N/3`,
+and `rtt` just before the drop (383 → 500 ms is the signature of the first one).
 
-**Criterio:** 15 minutos sin caidas, o caidas que se recuperan solas en el
-primer intento.
+**Done when:** fifteen minutes with no drops, or drops that recover on the first attempt.
 
-### T5 - Cadencia del RPM con el reparto por capacidad (depende de K2)
+### T5 — RPM cadence under the capacity-based split (needs K2)
 
-**Que se quiere saber:** que el planificador va dimensionado al enlace.
+**What we want to know:** that the scheduler is dimensioned to the link.
 
-**Como:** ralenti 2 minutos y luego una subida de vueltas mantenida 5 s.
+**How:** two minutes at idle, then a sustained rev for 5 s.
 
-**Que mirar:** segundos entre peticiones `010C` en el log, `rtt` medio, y la
-linea de demanda del test del nucleo.
+**What to look for:** seconds between `010C` requests in the log, average `rtt`, and
+the demand line printed by the core test.
 
-**Criterio:** RPM a >= 1 Hz y los cuatro valores de la pantalla activa a
->= 0,5 Hz, sin que el planificador pida mas de lo que el enlace da.
+**Done when:** RPM at ≥ 1 Hz and the four values of the active screen at ≥ 0.5 Hz,
+without asking for more than the link can give.
 
-### T6 - Panel GENERAL sin MAP (depende de K3)
+### T6 — GENERAL panel without MAP (needs K3)
 
-**Criterio:** en marcha, ningun dato fijo en `N/D` en la pantalla GENERAL;
-MAF y carga se mueven de forma coherente con el acelerador.
+**Done when:** while driving, no value on the GENERAL screen is stuck at `N/D`, and MAF
+and load track the throttle.
 
-### T7 - Codigos de averia (depende de la pantalla FALLOS)
+### T7 — Fault codes (needs the FALLOS screen)
 
-**Como:** leer PID `01`, luego modo `03`, `07` y `0A`.
+**How:** read PID `01`, then modes `03`, `07` and `0A`.
 
-**Criterio:** con el testigo apagado la pantalla dice "sin codigos" y no una
-lista vacia. Con codigos, coinciden con un lector comercial.
+**Done when:** with the lamp off the screen says "no codes" rather than showing an empty
+list; with codes present they match a commercial reader.
 
-### T8 - Protocolo forzado (opcional)
+### T8 — Forced protocol (optional)
 
-**Como:** crear `ms0:/PSP/SAVEDATA/PSPTORQUE/protocol.txt` con `3` y luego
-con `5`, lanzar la app cada vez.
+**How:** create `ms0:/PSP/SAVEDATA/PSPTORQUE/protocol.txt` containing `3`, launch, then
+repeat with `5`.
 
-**Que se quiere saber:** si el coche tambien contesta en KWP2000 (5). Si
-contesta, puede haber mas modulos direccionables que en ISO 9141-2.
+**What we want to know:** whether the car also answers on KWP2000 (5). If it does, there
+may be more addressable modules than under ISO 9141-2.
 
-**Criterio:** el log dice `Protocolo: forzado (ATSPx)` y luego `ATDPN` con el
-protocolo forzado, o un fallo limpio sin dejar el adaptador en `STOPPED`.
+**Done when:** the log shows `Protocolo: forzado (ATSPx)` followed by an `ATDPN` of the
+forced protocol, or a clean failure that does not leave the adapter in `STOPPED`.
 
-### T9 - Descubrimiento de modulos en K-line (depende de K4)
+### T9 — K-line module discovery (needs K4)
 
-**Criterio:** la pantalla MODULOS encuentra la centralita del motor en el
-MX-5 y muestra la mascara `BE1FB811`. En el MiTo (CAN) sigue igual que antes.
+**Done when:** the MODULOS screen finds the engine ECU on the MX-5 and shows mask
+`BE1FB811`, and the MiTo (CAN) still behaves as before.
 
-### T10 - Regresion en el MiTo (cada vez que se toque el nucleo)
+### T10 — MiTo regression (whenever the core is touched)
 
-**Por que:** la app se calibro para el MiTo y no se puede romper mientras se
-anade soporte K-line.
+**Why:** the app was calibrated on the MiTo and must not be broken while K-line support
+goes in.
 
-**Como:** con el MiTo y su adaptador, una sesion de 5 minutos.
+**How:** with the MiTo and its adapter, a five-minute session.
 
-**Criterio:** mismos PIDs que antes, `BOOST` con signo correcto, sin
-`STOPPED`, y el reparto por pantalla funcionando.
+**Done when:** same PIDs as before, `BOOST` with the right sign, no `STOPPED`, and the
+per-screen bandwidth split working.
 
-### T11 - Salida abrupta
+### T11 — Abrupt exit
 
-**Como:** lanzar la app, dejarla 30 s, apagar la PSP con el boton de encendido
-sin pasar por el menu.
+**How:** launch the app, leave it 30 s, then hold the PSP power switch up to kill it
+without going through the menu.
 
-**Criterio:** el log de esa sesion existe y llega hasta el ultimo segundo.
+**Done when:** that session's log exists and reaches the last second.

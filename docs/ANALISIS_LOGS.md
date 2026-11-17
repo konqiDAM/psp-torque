@@ -211,75 +211,66 @@ con la formula OBD estandar.
   (tambien con el motor en marcha); conviene tratarlo como N/D si llega 0
   de forma aislada.
 
-## Mazda MX-5 NB2 (2003) - phase1_001 a phase1_003 (17-nov-2026)
+## Mazda MX-5 NB2 (2003) - phase1_001 to phase1_003 (17 Nov 2026)
 
-Primera sesion de la app en un coche K-line (ISO 9141-2) con un ELM327 v2.3.
-Las tres sesiones cuentan la historia completa de tres fallos.
+The app's first session in a K-line car (ISO 9141-2), with an ELM327 v2.3. The three
+sessions tell the story of three failures.
 
-### phase1_001: nada funciona, y la culpa es de la app
+### phase1_001: nothing works, and the fault is ours
 
-- Red perfecta: `IP PSP 192.168.0.150`, SSID `V-LINK` abierta, gateway
-  `192.168.0.10`, TCP OK, `ATRV` 13.6 V. El adaptador responde a todo en
-  ~30 ms.
-- `ATDPN` = `A0` en las 6 reconsultas: el adaptador nunca identifico el
-  protocolo.
-- 303 lineas `SEARCHING...`, todas cortadas a los 3003 ms (handshake) o
-  2000 ms (sonda), que son exactamente los timeouts de la app.
-- **876 respuestas `STOPPED`** y **0 respuestas `NO DATA`**. Que no haya ni
-  un `NO DATA` es la clave: `NO DATA` significa "hable con la ECU y ese PID
-  no existe"; cero significa que el adaptador nunca llego a la centralita.
-- Sonda: 0/18 PID, mascaras a cero, sin VIN.
+- The network was perfect: `IP PSP 192.168.0.150`, SSID `V-LINK` open, gateway
+  `192.168.0.10`, TCP OK, `ATRV` 13.6 V. The adapter answered everything in ~30 ms.
+- `ATDPN` was `A0` on all six re-reads: the adapter never identified the protocol.
+- 303 `SEARCHING...` lines, every one cut at 3003 ms (handshake) or 2000 ms (probe),
+  which are exactly the app's timeouts.
+- **876 `STOPPED` replies** and **zero `NO DATA`**. The absence of `NO DATA` is the key:
+  `NO DATA` means "I spoke to the ECU and that PID does not exist"; zero of them means
+  the adapter never reached the ECU at all.
+- Probe: 0/18 PIDs, masks at zero, no VIN.
 
-Diagnostico: el ELM327 tarda unos 4 s en encontrar el protocolo de un coche
-K-line. La app lo abortaba a los 3 s, mandaba el comando siguiente en mitad
-de la busqueda y el adaptador contestaba `STOPPED` y se quedaba atascado ahi
-el resto de la sesion. Corregido en fase K1 (ver ROADMAP).
+Diagnosis: the ELM327 needs about 4 s to find a K-line car's protocol. The app aborted
+at 3 s, sent the next command mid-search, and the adapter answered `STOPPED` and stayed
+wedged there for the rest of the session. Fixed in phase K1 (see ROADMAP).
 
-### phase1_002: el log se pierde al salir
+### phase1_002: the log is lost on exit
 
-235 bytes: solo las lineas de arranque. El buffer de 4 KB del log solo se
-volcaba al llenarse o en unos pocos eventos, asi que salir de la app sin
-pasar por el menu dejaba la sesion entera en RAM. Corregido en fase K1b: el
-log se escribe en la tarjeta cada segundo.
+235 bytes: the boot lines only. The 4 KB log buffer was only flushed when it filled or
+at a handful of events, so leaving the app without going through the menu left the whole
+session in RAM. Fixed in phase K1b: the log is written to the card every second.
 
-### phase1_003: funciona
+### phase1_003: it works
 
-| Magnitud | Valor |
+| Quantity | Value |
 |---|---|
-| Duracion | 317 s (157 s conectado, luego dos caidas) |
-| Protocolo | `A3` = ISO 9141-2 (`ATDP`: AUTO, ISO 9141-2) |
-| Respuesta a `0100` tras `ATSP0` | `4100BE1FB811` en **4315 ms** |
-| Mascaras | `0100`=BE1FB811, `0120`=80000000, `0140` no |
-| PIDs activos | 15 |
-| Peticiones | 295 en 157 s = **1,9 req/s** |
-| Ida y vuelta | **383-384 ms** |
-| Cadencia del RPM | **4,4 s** (36 peticiones en 157 s) |
-| FPS / CPU | 30-60 fps, 2-5 ms por frame |
-| Sonda | 13/18 PID responden |
+| Duration | 317 s (157 s connected, then two drops) |
+| Protocol | `A3` = ISO 9141-2 (`ATDP`: AUTO, ISO 9141-2) |
+| Reply to `0100` after `ATSP0` | `4100BE1FB811` at **4315 ms** |
+| Masks | `0100`=BE1FB811, `0120`=80000000, `0140` not supported |
+| Active PIDs | 15 |
+| Requests | 295 in 157 s = **1.9 req/s** |
+| Round trip | **383-384 ms** |
+| RPM cadence | **4.4 s** (36 requests in 157 s) |
+| FPS / CPU | 30-60 fps, 2-5 ms per frame |
+| Probe | 13/18 PIDs answer |
 
-Valores al ralenti: 804-820 rpm, ECT 82-86 C, IAT 53 C, MAF 2,20-2,28 g/s,
-carga 18 %, mariposa 0 %, LTFT +3,13 %, avance +7,5 grados, O2 0,11 V,
-MIL apagado. Sin MAP, sin baro, sin tension de modulo, sin aceite y sin
-combustible.
+Idle values: 804-820 rpm, ECT 82-86 C, IAT 53 C, MAF 2.20-2.28 g/s, load 18 %,
+throttle 0 %, LTFT +3.13 %, advance +7.5 degrees, O2 0.11 V, MIL off. No MAP, no baro,
+no module voltage, no oil temperature, no fuel level.
 
-El SNR de cada PID a lo largo de la sesion (peticiones hasta t=157):
-RPM 36, MAF 31, mariposa 30, velocidad 29, carga 28, refrigerante 23,
-admision 21, LTFT 14, STFT 14, O2-2 13, O2-1 13, avance 13, MIL 12.
+Requests per PID up to t=157: RPM 36, MAF 31, throttle 30, speed 29, load 28, coolant
+23, intake 21, LTFT 14, STFT 14, O2-2 13, O2-1 13, advance 13, MIL 12.
 
-Consecuencia: el planificador esta saturado unas 7 veces. No es un fallo del
-algoritmo, es que los periodos base estan calibrados para un enlace CAN de
-12-14 req/s. Corregir en fase K2.
+Consequence: the scheduler is oversubscribed about 7x. The algorithm is not wrong, the
+base periods are calibrated for a CAN link of 12-14 req/s. Fixed in phase K2.
 
-### Caidas del enlace
+### Link drops
 
-`t=157`: rtt 383 -> 500 ms, 9 timeouts, reconexion automatica al primer
-intento. `t=233`: rtt 516 ms, 21 timeouts y los tres reintentos fallan;
-el resto de la sesion queda `offline`. Pendiente de investigar (T4 en
-PRUEBAS_PENDIENTES.md).
+`t=157`: rtt 383 -> 500 ms, 9 timeouts, the automatic reconnect recovered on the first
+attempt. `t=233`: rtt 516 ms, 21 timeouts, all three attempts failed and the rest of the
+session stayed `offline`. Still to investigate (T4 in PRUEBAS_PENDIENTES.md).
 
-### Lo que la sonda dio de si
+### What the probe produced
 
-- Cabecera cruda en K-line: `48 6B 10 41 00 BE 1F B8 11 AA`. Los tres
-  primeros bytes son la cabecera de ISO 9141-2 y es justo lo que el parser
-  de descubrimiento no reconoce.
-- Modo 09 vacio y con razon: el PID `09` no esta declarado en la mascara.
+- Raw K-line header: `48 6B 10 41 00 BE 1F B8 11 AA`. The first three bytes are the
+  ISO 9141-2 header, and that is exactly what the discovery parser fails to recognise.
+- Mode 09 empty, and correctly so: PID `09` is not declared in the mask.

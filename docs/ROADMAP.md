@@ -224,44 +224,58 @@ Criterios de aceptacion:
 - [ ] El RPM se refresca a >= 4,5 Hz en el coche y no quedan STOPPED con
       el hueco calibrado.
 
-## Fase 2.9 - Soporte K-line (FASE K)
+## Phase 2.9 - K-line support (PHASE K)
 
-Objetivo: que la app sea util en un coche que no es el de referencia. El
-segundo coche es un Mazda MX-5 NB2, ISO 9141-2, con un ELM327 v2.3: 383 ms
-de ida y vuelta y ~2 req/s, frente a los 50-67 ms y 12-14 req/s del MiTo.
-Lo medido esta en `docs/COMPATIBILIDAD_MX5_NB2.md` y en `ANALISIS_LOGS.md`.
+Goal: make the app useful in a car that is not the reference one. The second car is a
+Mazda MX-5 NB2, ISO 9141-2, with an ELM327 v2.3: 383 ms round trip and ~2 req/s, against
+the MiTo's 50-67 ms and 12-14 req/s. What was measured is in
+`docs/COMPATIBILIDAD_MX5_NB2.md` and `docs/ANALISIS_LOGS.md`.
 
-- [x] **K0 - Sonda del coche (`SONDA DEL COCHE`).** Octava pestana, solo
-  lectura. Lee identidad del adaptador y de la ECU, mascaras con la lista de
-  PID declarados, cabecera cruda y despues pide cada PID una vez para decir
-  cuales contesta el coche. Todo al log.
-- [x] **K1 - Esperar la busqueda de protocolo.** Mientras el adaptador diga
-  `SEARCHING` se le espera hasta 20 s. Antes se abortaba a los 3 s y el
-  ELM327 se quedaba en `STOPPED` el resto de la sesion (876 `STOPPED` y cero
-  `NO DATA` en `phase1_001`). Ademas `protocol.txt` permite forzar el
-  protocolo (3 = ISO 9141-2, 5 = KWP init rapido, 6/7 = CAN).
-- [x] **K1b - Log que no se pierde.** Se escribe en la tarjeta cada segundo y
-  se sincroniza cada 2 s. Antes, salir sin pasar por el menu dejaba el log
-  con las lineas de arranque (235 bytes de una sesion entera).
-- [ ] **K2 - Reparto de periodos por capacidad medida.** Los periodos base
-  suponen 12-14 req/s; el K-line da 1,9. Medido: RPM cada 4,4 s. El
-  planificador debe partir de la capacidad del enlace (medida o por clase de
-  protocolo) y repartir: pocos PID, rapidos, y los lentos fuera de pantalla.
-  Criterio: con el motor al ralenti y en marcha, RPM a >= 1 Hz y los cuatro
-  valores de la pantalla activa a >= 0,5 Hz, sin saturar (`test_demand_*`).
-- [ ] **K3 - Panel GENERAL sin MAP.** En un atmosferico sin `0B` ni `33` el
-  indicador central de boost es `N/D` permanente. Sustituirlo por MAF (g/s)
-  y carga (%), y desactivar el aprendizaje de `TURBO AUTO` cuando no hay MAP.
-  Criterio: la pantalla GENERAL no muestra ningun `N/D` fijo.
-- [ ] **K4 - Descubrimiento de modulos en K-line.** `obd_disc_parse_line`
-  solo reconoce cabeceras CAN (3 u 8 digitos hex). La cabecera real de este
-  coche es `48 6B 10` (tres bytes, seis digitos). Criterio: test unitario con
-  la linea `48 6B 10 41 00 BE 1F B8 11 AA` que devuelve la mascara
-  `BE1FB811`, y la pantalla MODULOS encuentra la centralita en K-line.
-- [ ] **K5 - Estabilidad del enlace.** Dos caidas en 5 minutos en
-  `phase1_003` (a los 157 s y a los 233 s), la segunda sin recuperar. Hay que
-  separar adaptador, WiFi de la PSP y coche, y decidir si el reintento
-  necesita algo mas que los tres intentos actuales.
+- [x] **K0 - Vehicle probe (`SONDA DEL COCHE`).** Eighth tab, read-only. Reads adapter
+  and ECU identity, the masks with the list of declared PIDs, the raw header line, and
+  then requests every PID once to show which ones the car answers. Everything to the log.
+- [x] **K1 - Wait for the protocol search.** While the adapter says `SEARCHING` the app
+  now waits up to 20 s. It used to abort at 3 s, which left the ELM327 stuck in `STOPPED`
+  for the rest of the session (876 `STOPPED` and zero `NO DATA` in `phase1_001`).
+  `protocol.txt` additionally allows forcing the protocol (3 = ISO 9141-2, 5 = KWP fast
+  init, 6/7 = CAN).
+- [x] **K1b - A log that survives.** Written to the card every second, filesystem sync
+  every 2 s. Before, leaving the app without the menu left the log with the boot lines
+  only (235 bytes of an entire session).
+- [ ] **K2 - Period split by measured capacity.** The base periods assume 12-14 req/s;
+  K-line gives 1.9. Measured: RPM every 4.4 s. The scheduler must start from the link's
+  capacity (measured, or by protocol class) and split: few PIDs, fast, with the slow ones
+  off-screen. Criterion: at idle and while driving, RPM at >= 1 Hz and the four values of
+  the active screen at >= 0.5 Hz, without saturating the link.
+- [ ] **K3 - GENERAL panel without MAP.** On a naturally aspirated car with no `0B` and
+  no `33` the centre boost gauge is a permanent `N/D`. Replace it with MAF (g/s) and load
+  (%), and disable `TURBO AUTO` learning when there is no MAP. Criterion: the GENERAL
+  screen shows no permanently missing value.
+- [ ] **K4 - K-line module discovery.** `obd_disc_parse_line` only recognises CAN headers
+  (3 or 8 hex digits). This car's real header is `48 6B 10` (three bytes, six digits).
+  Criterion: a unit test with the line `48 6B 10 41 00 BE 1F B8 11 AA` returning mask
+  `BE1FB811`, and the MODULOS screen finding the ECU over K-line.
+- [ ] **K5 - Link stability.** Two drops in five minutes in `phase1_003` (at 157 s and
+  233 s), the second one never recovered. Separate adapter, PSP WiFi and car, and decide
+  whether reconnecting needs more than the current three attempts.
+- [ ] **K6 - Bilingual screens.** The `SONDA` screen was written with Spanish literals;
+  the app already has an ES/EN table behind `tr()`. Route its labels through `tr()` and
+  add the English entries, so the screen follows the language setting like the rest.
+
+## Phase 5 - On-board diagnostics (FALLOS screen)
+
+Goal: have the app say why the check-engine lamp came on. Today it only shows live data
+and PID `21` (distance with MIL); it never reads codes.
+
+- [ ] Read PID `01` (MIL state and number of stored codes).
+- [ ] Mode `03`: stored codes, decoded to P0xxx with a local description table.
+- [ ] Mode `07`: pending codes. Mode `0A`: permanent codes.
+- [ ] Mode `02`: freeze frame for the first code (a snapshot of the data at the fault).
+- [ ] Mode `06`: on-board monitor results (pass/fail).
+- [ ] Read-only throughout. Mode `04` (clear) and mode `08` are never sent.
+
+Criterion: on a car with the lamp on, the screen shows the same code as a commercial
+reader, and with no codes it says so explicitly instead of showing an empty list.
 
 ## Fase 3 — Parámetros específicos Alfa Romeo (investigación)
 
@@ -289,23 +303,6 @@ Criterios de aceptación:
 - Empaquetado (`EBOOT.PBP`, icono, manual).
 - Pruebas de uso real: montaje, legibilidad con sol, guantes, acompañante.
 
-## Fase 5 - Diagnostico a bordo (pantalla FALLOS)
-
-Objetivo: que la app diga por que se ha encendido el testigo de averia. Hoy
-solo muestra datos vivos y PID `21` (distancia con MIL); no lee codigos.
-
-- [ ] Leer PID `01` (estado del testigo MIL y numero de codigos guardados).
-- [ ] Modo `03`: codigos guardados, con su descripcion por tabla local.
-- [ ] Modo `07`: codigos pendientes. Modo `0A`: codigos permanentes.
-- [ ] Modo `02`: freeze frame del primer codigo (foto de los datos en el
-  momento del fallo).
-- [ ] Modo `06`: resultados de los monitores a bordo (pasa/falla).
-- [ ] Todo solo lectura. No se enviara nunca modo `04` (borrar) ni `08`.
-
-Criterio de cierre: en un coche con el testigo encendido, la pantalla muestra
-el mismo codigo que un lector comercial, y sin codigos lo dice explicitamente
-(en vez de una lista vacia).
-
 ## Fuera de alcance
 
 - Escritura/codificación en la ECU.
@@ -316,32 +313,33 @@ el mismo codigo que un lector comercial, y sin codigos lo dice explicitamente
 
 ## Riesgos principales
 
-| Riesgo | Impacto | Mitigación |
+| Risk | Impact | Mitigation |
 |---|---|---|
-| PSP sin WPA2 nativo | Alto | Adaptador abierto/WEP/WPA-TKIP, plugin ARK4 o puente |
-| Adaptador sin DHCP | Medio | IP estática configurable |
-| PID no disponibles | Alto | Máscaras + `N/D`, perfil por sesión |
-| ELM327 clon lento/inestable | Medio | Timeouts, backoff, diagnóstico |
-| Ancho de banda bajo | Medio | Scheduler por prioridad, no pedir todo |
-| Memoria/CPU PSP | Medio | Buffers fijos, 30 fps, atlas de fuente |
-| Memory Stick lenta/extraída | Bajo | Flush periódico, cierre seguro |
-| Interpretar boost/Torque mal | Alto | MAP/baro explícitos, `EST`, no inventar |
-| Fatiga/seguridad al conducir | Alto | Montaje, acompañante, solo lectura |
-| Enlace K-line de ~2 req/s | Alto | Reparto por capacidad (K2), pocos PID en pantalla |
-| Cabeceras de 3 bytes en K-line | Medio | Parser de descubrimiento por protocolo (K4) |
-| Clon ELM327 v2.3 con 383 ms | Medio | Documentar el techo; recomendar adaptador mejor |
+| PSP without native WPA2 | High | Open/WEP/WPA-TKIP adapter, ARK4 plugin, or a bridge |
+| Adapter without DHCP | Medium | Configurable static IP |
+| PIDs not available | High | Masks + `N/D`, per-session profile |
+| Slow or unstable ELM327 clone | Medium | Timeouts, backoff, diagnostics |
+| Low bandwidth | Medium | Priority scheduler, never poll everything |
+| PSP memory/CPU | Medium | Fixed buffers, 30 fps, font atlas |
+| Slow or removed Memory Stick | Low | Periodic flush, clean close |
+| Misreading boost/Torque | High | Explicit MAP/baro, `EST`, never invent |
+| Fatigue/safety while driving | High | Mounting, passenger, read-only |
+| K-line link of ~2 req/s | High | Capacity-based split (K2), few PIDs on screen |
+| Three-byte headers on K-line | Medium | Per-protocol discovery parser (K4) |
+| ELM327 v2.3 clone at 383 ms | Medium | Document the ceiling; recommend a better adapter |
 
 ## Decisiones pendientes
 
-1. Modo de seguridad real del ELM327 y modelo/CFW de PSP.
-2. Toolchain: Docker `pspdev` o instalación nativa.
-3. Confirmar si el coche expone `0x0B` (MAP), `0x33` (baro), `0x5C` (aceite)
-   y `0x5E` (caudal).
-4. Confirmar el redline real y los umbrales que quiere el usuario.
-5. Confirmar si se usará el plugin WPA2 de ARK4 o un puente.
-6. K2: periodos por clase de protocolo fijos o medidos en caliente con el rtt.
-7. Pantalla FALLOS: pestana propia o dentro de DIAG.
-8. MODULOS y SNIFFER en un coche K-line: ocultarlas, avisar o adaptarlas.
-9. Panel GENERAL: que se adapte solo al coche (sin MAP -> MAF/carga) o que sea
-   un perfil elegible.
-10. Si el soporte K-line se hace generico (cualquier coche) o solo MX-5.
+1. Real ELM327 security mode and exact PSP model/CFW.
+2. Toolchain: Docker `pspdev` or a native install.
+3. Confirm whether the car exposes `0x0B` (MAP), `0x33` (baro), `0x5C` (oil) and
+   `0x5E` (fuel rate). **Answered for the MX-5 in `COMPATIBILIDAD_MX5_NB2.md`: none of
+   them exists.**
+4. Confirm the real redline and the thresholds the owner wants.
+5. Whether the ARK4 WPA2 plugin will be used or a bridge.
+6. K2: fixed periods per protocol class, or measured live from `rtt`.
+7. FALLOS: its own tab, or inside DIAG.
+8. MODULOS and SNIFFER on a K-line car: hide them, warn, or adapt them.
+9. GENERAL panel: adapt automatically to the car (no MAP means MAF/load), or make the
+   layout a selectable profile.
+10. Whether K-line support is generic (any car) or MX-5 only.

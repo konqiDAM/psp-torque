@@ -1,20 +1,20 @@
-# Entorno de desarrollo
+# Development environment
 
-Como se compila, se prueba y se instala esta app en la maquina de desarrollo
-actual (Windows con WSL). El `tools/build.ps1` del repositorio usa Docker, que
-en esta maquina no esta instalado: lo de abajo funciona sin Docker.
+How this app is built, tested and installed on the current development machine
+(Windows with WSL). The repository's `tools/build.ps1` drives Docker, which is not
+installed here; what follows works without it.
 
 ## 1. Toolchain
 
-El toolchain oficial de pspdev se publica como tar.gz en GitHub. En Ubuntu
-22.04 no arranca (necesita glibc 2.38 y alli hay 2.35), asi que se usa una
-distro **Ubuntu-24.04** en WSL:
+The official pspdev toolchain is published as a tarball on GitHub. It does not run on
+Ubuntu 22.04 (it needs glibc 2.38 and that release ships 2.35), so use an
+**Ubuntu-24.04** WSL distribution:
 
 ```powershell
 wsl --install -d Ubuntu-24.04 --no-launch
 ```
 
-Dentro de la distro (como root, no hace falta usuario):
+Inside the distribution (as root; no user account needed):
 
 ```sh
 apt-get update && apt-get install -y make gcc
@@ -23,16 +23,16 @@ curl -sL -o pspdev.tar.gz https://github.com/pspdev/pspdev/releases/download/v20
 mkdir -p pspdev && tar xzf pspdev.tar.gz -C pspdev --strip-components=1
 ```
 
-`PSPDEV` es la variable que define el toolchain: el Makefile usa
-`PSPDEV ?= /usr/local/pspdev` y de ahi saca `psp/sdk/lib/build.mak`.
+`PSPDEV` is what points the Makefile at the toolchain: it defaults to
+`/usr/local/pspdev` and derives `psp/sdk/lib/build.mak` from it.
 
-## 2. Compilar
+## 2. Building
 
-El repositorio esta en el disco de Windows, asi que conviene compilar sobre
-una copia en el sistema de ficheros de Linux (mas rapido que `/mnt/c`):
+The repository lives on the Windows disk, so build from a copy on the Linux filesystem
+(faster than `/mnt/c`):
 
 ```sh
-rm -rf /root/work/psp-torque
+rm -rf /root/work/psp-torque-fork
 cp -r /mnt/c/Users/void/psp/psp-torque-fork /root/work/psp-torque-fork
 cd /root/work/psp-torque-fork
 export PATH=/root/pspdev/bin:$PATH
@@ -40,68 +40,64 @@ make clean PSPDEV=/root/pspdev
 make PSPDEV=/root/pspdev
 ```
 
-- **Cero avisos** con `-Wall -Wextra -std=c99`. Un aviso nuevo es un fallo.
-- `make clean` tambien necesita `PSPDEV`: sin el, el Makefile no encuentra
-  `build.mak` y falla antes de hacer nada.
-- El resultado es `EBOOT.PBP` en la raiz, con un `PARAM.SFO` generado con
-  `MEMSIZE=2` (valor por defecto de pspdev).
+- **Zero warnings** under `-Wall -Wextra -std=c99`. A new warning is a failure.
+- `make clean` also needs `PSPDEV`: without it the Makefile cannot find `build.mak` and
+  fails before doing anything.
+- The output is `EBOOT.PBP` in the repository root, with a `PARAM.SFO` generated at
+  `MEMSIZE=2` (the pspdev default).
 
-## 3. Pruebas del nucleo
+## 3. Core tests
 
-No necesitan toolchain de PSP, solo un compilador de PC:
+These need no PSP toolchain, only a host compiler:
 
 ```sh
 make -C tests clean all
 ```
 
-Sale `OK: todas las pruebas pasan` y una linea con la demanda de cada
-pantalla. Cualquier cambio en `src/core/` o en la tabla de periodos tiene que
-ir con su prueba aqui.
+It prints `OK: todas las pruebas pasan` plus a line with the per-screen demand. Any
+change under `src/core/` or to the period table comes with its own test here.
 
-## 4. Probar sin PSP (PPSSPP)
+## 4. Testing without a PSP (PPSSPP)
 
-PPSSPP esta instalado en `C:/Program Files/PPSSPP`. Su tarjeta de memoria es
-`C:/Users/void/Documents/PPSSPP/PSP`, con la misma estructura que la PSP
-(`GAME`, `SAVEDATA`, `SYSTEM`).
+PPSSPP is installed at `C:/Program Files/PPSSPP`. Its memory stick is
+`C:/Users/void/Documents/PPSSPP/PSP`, with the same layout as the console (`GAME`,
+`SAVEDATA`, `SYSTEM`).
 
-- Se puede lanzar un EBOOT directamente:
-  `PPSSPPWindows64.exe ruta\EBOOT.PBP`.
-- Los mandos por teclado estan en
-  `Documents/PPSSPP/PSP/SYSTEM/controls.ini`. Codigos utiles: Cruz = 54
-  (tecla `Z`), Circulo = 52 (`X`), Cuadrado = 29 (`A`), Triangulo = 47 (`S`),
-  L = 45 (`Q`), R = 51 (`W`), Start = 62 (espacio).
-- El log de la app aparece en `Documents/PPSSPP/PSP/SAVEDATA/PSPTORQUE`. Es la
-  forma barata de comprobar que una pantalla nueva dibuja y que el log escribe,
-  antes de tocar hardware.
+- An EBOOT can be launched directly: `PPSSPPWindows64.exe path\EBOOT.PBP`.
+- Keyboard bindings live in `Documents/PPSSPP/PSP/SYSTEM/controls.ini`. Useful codes:
+  Cross = 54 (`Z`), Circle = 52 (`X`), Square = 29 (`A`), Triangle = 47 (`S`),
+  L = 45 (`Q`), R = 51 (`W`), Start = 62 (space).
+- The app's log appears in `Documents/PPSSPP/PSP/SAVEDATA/PSPTORQUE`. That is the cheap
+  way to confirm a new screen draws and the log writes, before touching hardware.
 
-## 5. Instalar en la PSP
+## 5. Installing on the PSP
 
-La PSP aparece como unidad extraible (aqui `F:`). La app vive en:
+The PSP appears as a removable drive (here `F:`). The app lives at:
 
 ```
 F:/PSP/GAME/HOMEBREW/psp-torque/EBOOT.PBP
 ```
 
-Los datos (log, ajustes, host, chime) van a `F:/PSP/SAVEDATA/PSPTORQUE/`, que
-crea la propia app. No hay que copiar nada mas.
+Data (log, settings, host file, chime) goes to `F:/PSP/SAVEDATA/PSPTORQUE/`, which the
+app creates itself. Nothing else needs copying.
 
-Tras copiar, pulsar `O` en la PSP para salir del modo USB antes de
-desconectar.
+After copying, press `O` on the console to leave USB mode before unplugging.
 
-## 6. Recoger el log
+## 6. Collecting the log
 
-El log se escribe cada segundo, asi que existe aunque la app muera de golpe:
+The log is written every second, so it survives even an abrupt shutdown:
 
 ```
 F:/PSP/SAVEDATA/PSPTORQUE/phase1_AAAAMMDD_HHMMSS.log
 ```
 
-Si el reloj de la PSP no esta puesto, numera seguido (`phase1_001.log`,
-`phase1_002.log`...). Salir siempre que se pueda con `START > SALIR > X`.
+If the console clock is unset it numbers sequentially instead (`phase1_001.log`,
+`phase1_002.log`…). Prefer exiting with `START > SALIR > X`.
 
 ## 7. Git
 
-- `konqiDAM/psp-torque` es el fork donde se trabaja; `autografia/psp-torque`
-  es el original, al que se abrira un PR cuando haya algo que revisar.
-- Una rama por cambio, mensajes en espanol como el resto del historial.
-- La rama actual del trabajo K-line es `feat/sonda-diagnostico`.
+- `konqiDAM/psp-torque` is the fork we work in; `autografia/psp-torque` is the original,
+  which will receive a pull request once there is something to review.
+- One branch per piece of work. Commit messages are in English from now on, while the
+  existing history is Spanish.
+- The current K-line branch is `feat/sonda-diagnostico`.
