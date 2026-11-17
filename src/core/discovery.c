@@ -80,6 +80,68 @@ static const char *parse_header_29(const char *p, char *out, size_t out_size)
     return p;
 }
 
+/*
+ * Cabecera de K-line (ISO 9141-2 y KWP2000) escrita con espacios:
+ * "48 6B 10". Son tres bytes, no cuatro como en el CAN de 29 bits, y no
+ * tienen prefijo fijo: el primero es el byte de formato y el ultimo la
+ * direccion del que responde. Es lo que manda un coche OBD-II anterior a
+ * CAN en cuanto se activan las cabeceras.
+ *
+ * Para no comerse los datos cuando el adaptador NO manda cabeceras, solo
+ * se acepta si el byte de formato tiene la forma de una cabecera de tres
+ * bytes (nibble alto 4, 8 o C) y el byte que viene detras es una respuesta
+ * (0x4x) o un rechazo (0x7F). Sin las dos condiciones, la linea se lee
+ * como datos, que es lo que era hasta ahora.
+ */
+static int kline_format_byte(uint8_t b)
+{
+    uint8_t hi = (uint8_t)(b >> 4);
+    return hi == 0x4 || hi == 0x8 || hi == 0xC;
+}
+
+static int looks_like_response(uint8_t b)
+{
+    return (b & 0xF0) == 0x40 || b == 0x7F;
+}
+
+static const char *parse_header_kline(const char *p, char *out,
+                                      size_t out_size)
+{
+    char hdr[7];
+    int used = 0;
+    const char *q = p;
+
+    for (int i = 0; i < 3; i++) {
+        q = skip_spaces(q);
+        size_t n = token_len(q);
+        if (n != 2 || !is_hex_token(q, 2)) {
+            return NULL;
+        }
+        int b = (hex_value(q[0]) << 4) | hex_value(q[1]);
+        if (i == 0 && !kline_format_byte((uint8_t)b)) {
+            return NULL;
+        }
+        hdr[used++] = q[0];
+        hdr[used++] = q[1];
+        q += n;
+    }
+    hdr[used] = '\0';
+
+    const char *next = skip_spaces(q);
+    if (token_len(next) < 2 || hex_value(next[0]) < 0 || hex_value(next[1]) < 0) {
+        return NULL;
+    }
+    if (!looks_like_response((uint8_t)((hex_value(next[0]) << 4) |
+                                       hex_value(next[1])))) {
+        return NULL;
+    }
+    if (out_size < (size_t)used + 1) {
+        return NULL;
+    }
+    memcpy(out, hdr, (size_t)used + 1);
+    return q;
+}
+
 int obd_disc_parse_line(const char *text, obd_disc_line *out)
 {
     if (text == NULL || out == NULL) {
@@ -109,11 +171,15 @@ int obd_disc_parse_line(const char *text, obd_disc_line *out)
             p += n;
         } else if (n == 2 && is_hex_token(p, n)) {
             const char *after = parse_header_29(p, out->header,
-                                                 sizeof(out->header));
+                                                sizeof(out->header));
+            if (after == NULL) {
+                after = parse_header_kline(p, out->header,
+                                           sizeof(out->header));
+            }
             if (after != NULL) {
                 p = after;
             }
-            /* Si no era una cabecera de 29 bits, se deja como datos. */
+            /* Si no era una cabecera, se deja como datos. */
         }
     }
 

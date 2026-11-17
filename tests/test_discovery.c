@@ -91,6 +91,25 @@ void test_discovery(void)
     obd_disc_ascii(vin, (int)sizeof(vin), text, sizeof(text));
     CHECK(strcmp(text, "ZARAS0000") == 0);
 
+    /* K-line: la cabecera son TRES bytes. Esta es la linea real que
+     * capturo la MX-5 NB2 (docs/COMPATIBILIDAD_MX5_NB2.md); hasta ahora
+     * los tres bytes se leian como datos y la mascara salia basura. */
+    check_line("48 6B 10 41 00 BE 1F B8 11 AA", "486B10", 7);
+    CHECK(obd_disc_parse_line("48 6B 10 41 00 BE 1F B8 11 AA", &line) == 1);
+    CHECK(line.data[0] == 0x41);
+    len = obd_disc_payload(&line, &payload);
+    CHECK(len == 7);
+    CHECK(obd_disc_mask(payload + 2, 4) == 0xBE1FB811u);
+
+    /* Y un rechazo tambien trae cabecera. */
+    check_line("48 6B 10 7F 01 12", "486B10", 3);
+
+    /* Pero sin cabeceras activadas la misma respuesta NO se puede tomar
+     * por una cabecera: el cuarto byte no es una respuesta. */
+    check_line("41 00 BE 1F B8 11 AA", "", 7);
+    check_line("41 0C 1A F8", "", 4);
+    check_line("43 00 00 00 00 00 00", "", 7);
+
     /* Mascaras reales del MiTo. */
     CHECK(obd_disc_mask((const uint8_t[]){0xBE,0x3E,0xB8,0x11}, 4) ==
           0xBE3EB811u);
