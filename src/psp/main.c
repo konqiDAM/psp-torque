@@ -673,7 +673,7 @@ static void log_sync(void)
         if (g_log_dirty) {
             uint32_t now = now_ms();
             if (g_log_last_sync_ms == 0 ||
-                (uint32_t)(now - g_log_last_sync_ms) >= 30000u) {
+                (uint32_t)(now - g_log_last_sync_ms) >= 2000u) {
                 sceIoSync("ms0:", 0);
                 g_log_dirty = 0;
                 g_log_last_sync_ms = now;
@@ -8518,6 +8518,10 @@ static void run_dashboard(Target *targets, int target_count)
                             g_demo ? " (SIM)" :
                             (sock >= 0 ? "" : " (offline)"));
             last_status = now;
+            /* La linea de estado sale una vez por segundo: escritura a
+             * la tarjeta tambien cada segundo. Si la app muere sin
+             * cerrar, se pierde como mucho el ultimo segundo de log. */
+            log_sync();
             gap_acc = 0;
             gap_n = 0;
         }
