@@ -306,13 +306,17 @@ Goal: stop navigating eight tabs with two triggers, make SELECT carry its own jo
 the layout per car, and let the app work out which car it is in. Full design in
 `docs/superpowers/specs/2026-11-17-ui-screens-preferences-and-vehicle-profiles-design.md`.
 
-- [ ] **U1 - Screen picker on SELECT.** SELECT currently duplicates START (verified in
-  `handle_ui_input`: both open the settings overlay). It opens a picker with every screen,
-  its purpose and its availability; X or START opens the chosen one.
-- [ ] **U2 - Two-tier bar.** GENERAL, MOTOR, TELEM and DIAG are the driving tier, cycled
-  with L/R and shown in the bar. MODULOS, SNIFFER, SONDA and INFO move to the tools tier,
-  reached through the picker. Screens the car cannot use are not offered, with the reason
-  shown in the picker.
+- [x] **U1 - Screen picker on SELECT.** Done in `fase2.44`. SELECT opens a full-screen
+  list of all eight screens with a one-line purpose each; UP/DOWN moves, X or START opens
+  it, SELECT or CIRCLE closes it. START keeps the settings menu. The current screen is
+  marked ACTUAL and the selection skips screens this car cannot use.
+- [x] **U2 - Two-tier bar.** Done in `fase2.44`. GENERAL, MOTOR, DIAG and TELEM are the
+  driving tier: the only screens L/R cycles and the only ones drawn in the bar. MODULOS,
+  SNIFFER, SONDA and INFO are the tools tier, reached through the picker, and the bar then
+  shows the screen name plus `HERRAMIENTAS  L/R: VOLVER`. MODULOS and SNIFFER are greyed
+  with a reason on a K-line car (`scan_can()` reads the ATDPN reply, no bus traffic), and
+  `last=` in `settings.txt` reopens the app on the last driving screen, written once per
+  change and on exit.
 - [ ] **U3 - Preferences v2.** `version=2` line, `start` (a screen name or `last`), `last`,
   `hidden`, and per-vehicle keys `v.<id>.<key>` for layout and tacho. Existing keys keep
   working as global defaults.

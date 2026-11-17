@@ -75,7 +75,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.43 2026-11-16 FASE F1+F3+F2.5 hueco ajustable, reparto por pantalla y edad global"
+#define BUILD_TAG "fase2.44 2026-11-17 FASE U1+U2 barra de conduccion, selector de pantallas (SELECT) y arranque en la ultima"
 #define CMD_TIMEOUT_MS 500
 /* Si el adaptador ha demostrado que envia el prompt '>', hay que esperarlo
  * antes de mandar el siguiente comando. El ELM327 hace tareas internas
@@ -166,7 +166,137 @@ static obd_smooth g_ema_thr;
 #define HIST_MAX 180
 
 static int g_mode = MODE_QV;
+static int g_last_mode = MODE_QV;    /* pantalla recordada entre sesiones */
+static int g_picker_open = 0;        /* selector de pantallas (SELECT) */
+static int g_picker_sel = 0;
+static int g_last_saved_mode = -1;  /* ultima pantalla escrita en last= */
+
+static int scan_can(void);
+static const char *tr(const char *key);
 static unsigned int g_prev_buttons = 0;
+
+/* Nombre visible de cada pantalla, en la barra y en el selector. */
+static const char *mode_name(int mode)
+{
+    switch (mode) {
+    case MODE_QV:        return tr("GENERAL");
+    case MODE_ENGINE:    return tr("MOTOR");
+    case MODE_MOTOR:     return tr("DIAG");
+    case MODE_TELEMETRY: return tr("TELEM");
+    case MODE_MODULES:   return tr("MODULOS");
+    case MODE_SNIFFER:   return tr("SNIFFER");
+    case MODE_INFO:      return tr("INFO");
+    case MODE_PROBE:     return tr("SONDA");
+    default:             return "";
+    }
+}
+
+/* Una sola linea de para que sirve cada pantalla, para el selector. */
+static const char *mode_purpose(int mode)
+{
+    switch (mode) {
+    case MODE_QV:        return tr("Dashboard principal");
+    case MODE_ENGINE:    return tr("Detalle del motor");
+    case MODE_MOTOR:     return tr("Mezcla y encendido");
+    case MODE_TELEMETRY: return tr("Series de telemetria");
+    case MODE_MODULES:   return tr("Centralitas del coche");
+    case MODE_SNIFFER:   return tr("Trafico del bus");
+    case MODE_INFO:      return tr("Que es cada dato");
+    case MODE_PROBE:     return tr("Probar un coche");
+    default:             return "";
+    }
+}
+
+/* Pantallas de conduccion: las unicas que recorre L/R y las unicas que
+ * salen en la barra superior. */
+static int mode_is_driving(int mode)
+{
+    return mode == MODE_QV || mode == MODE_ENGINE ||
+           mode == MODE_MOTOR || mode == MODE_TELEMETRY;
+}
+
+/* Una pantalla que este coche no puede usar no se ofrece en la barra y
+ * sale en gris en el selector con el motivo. Mientras no se conoce el
+ * protocolo (antes de conectar) no se oculta nada. */
+static int screen_available(int mode)
+{
+    if (mode != MODE_MODULES && mode != MODE_SNIFFER) {
+        return 1;
+    }
+    if (g_proto[0] == 0 || strcmp(g_proto, "?") == 0) {
+        return 1;
+    }
+    return scan_can();
+}
+
+/* Motivo por el que una pantalla no esta disponible, o cadena vacia. */
+static const char *screen_reason(int mode)
+{
+    if (screen_available(mode)) {
+        return "";
+    }
+    if (mode == MODE_SNIFFER) {
+        return tr("Solo CAN");
+    }
+    return tr("K-line: pendiente");
+}
+
+/* Orden del selector: primero lo que se usa conduciendo, despues las
+ * herramientas. */
+static const int g_picker_order[MODE_COUNT] = {
+    MODE_QV, MODE_ENGINE, MODE_MOTOR, MODE_TELEMETRY,
+    MODE_MODULES, MODE_SNIFFER, MODE_INFO, MODE_PROBE
+};
+
+static int picker_index_of(int mode)
+{
+    for (int i = 0; i < MODE_COUNT; i++) {
+        if (g_picker_order[i] == mode) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+/* Mueve la seleccion saltando las pantallas que este coche no tiene. */
+static int picker_step(int idx, int dir)
+{
+    for (int k = 1; k <= MODE_COUNT; k++) {
+        int ni = (idx + dir * k) % MODE_COUNT;
+        if (ni < 0) {
+            ni += MODE_COUNT;
+        }
+        if (screen_available(g_picker_order[ni])) {
+            return ni;
+        }
+    }
+    return idx;
+}
+
+/* L/R solo recorre las pantallas de conduccion. Desde una herramienta
+ * vuelve al dashboard: pasar por SNIFFER o MODULOS sin querer, con el
+ * coche en marcha, no es aceptable. */
+static int mode_step(int mode, int dir)
+{
+    static const int driving[4] = { MODE_QV, MODE_ENGINE, MODE_MOTOR,
+                                    MODE_TELEMETRY };
+    int idx = -1;
+
+    if (!mode_is_driving(mode)) {
+        return MODE_QV;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (driving[i] == mode) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx < 0) {
+        return MODE_QV;
+    }
+    return driving[(idx + dir + 4) % 4];
+}
+
 static int g_link_connected = 0;
 
 /* FASE F2: respuestas STOPPED seguidas del adaptador.
@@ -500,6 +630,21 @@ static const char *tr(const char *key)
           "UP/DOWN: SELECT   LEFT/RIGHT: CHANGE" },
         { "X: GUARDAR   CIRCLE: BORRAR TURBO   START: SALIR",
           "X: SAVE   CIRCLE: CLEAR TURBO   START: EXIT" },
+        { "PANTALLAS", "SCREENS" },
+        { "HERRAMIENTAS", "TOOLS" },
+        { "L/R: VOLVER", "L/R: BACK" },
+        { "X: ABRIR   SELECT: CERRAR", "X: OPEN   SELECT: CLOSE" },
+        { "Dashboard principal", "Main dashboard" },
+        { "Detalle del motor", "Engine detail" },
+        { "Mezcla y encendido", "Mixture and ignition" },
+        { "Series de telemetria", "Telemetry traces" },
+        { "Centralitas del coche", "ECU discovery" },
+        { "Trafico del bus", "Bus capture" },
+        { "Que es cada dato", "What each value is" },
+        { "Probar un coche", "Try a car" },
+        { "Solo CAN", "CAN only" },
+        { "K-line: pendiente", "K-line: pending" },
+        { "ACTUAL", "CURRENT" },
     };
     if (g_lang == 0 || key == NULL) {
         return key;
@@ -922,6 +1067,12 @@ static void settings_load(void)
                            strcmp(key, "fps_show") == 0 ||
                            strcmp(key, "show_fps") == 0) {
                     g_cfg.show_fps = atoi(val) ? 1 : 0;
+                } else if (strcmp(key, "last") == 0 ||
+                           strcmp(key, "pantalla") == 0) {
+                    int v = atoi(val);
+                    if (v >= 0 && v < MODE_COUNT) {
+                        g_last_mode = v;
+                    }
                 } else if (strcmp(key, "debug") == 0) {
                     g_cfg.debug = atoi(val) ? 1 : 0;
                 } else if (strcmp(key, "elm_gap") == 0 ||
@@ -1080,7 +1231,8 @@ static void settings_save(void)
                      "tel4_item=%d\n"
                      "fps_show=%d\n"
                      "debug=%d\n"
-                     "elm_gap=%d\n",
+                     "elm_gap=%d\n"
+                     "last=%d\n",
                      g_cfg.theme, g_cfg.color, g_cfg.lang, g_cfg.contrast, g_cfg.anim,
                      g_cfg.fast, g_cfg.peak_hold,
                      g_cfg.smooth, g_cfg.shift_rpm, g_cfg.rpm_max,
@@ -1094,7 +1246,7 @@ static void settings_save(void)
                      g_slot_item[5], g_slot_style[5],
                      g_tel_item[0], g_tel_item[1], g_tel_item[2],
                      g_tel_item[3], g_tel_item[4],
-                     g_cfg.show_fps, g_cfg.debug, g_elm_min_gap_ms);
+                     g_cfg.show_fps, g_cfg.debug, g_elm_min_gap_ms, g_mode);
     if (n > (int)sizeof(buf) - 1) {
         n = (int)sizeof(buf) - 1;
     }
@@ -4441,21 +4593,29 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms)
     gfx_rect(0, 25, GFX_W, 1,
              theme_is_game() ? theme_accent() : QV_RED);
 
-    const char *tabs[MODE_COUNT] = {
-        tr("GENERAL"), tr("MOTOR"), tr("DIAG"),
-        tr("TELEM"), tr("MODULOS"), tr("SNIFFER"), tr("INFO"), tr("SONDA")
-    };
-    static const int tab_x[MODE_COUNT] = { 6, 66, 110, 146, 190, 250, 310, 346 };
+    static const int drive_mode[4] = { MODE_QV, MODE_ENGINE, MODE_MOTOR,
+                                       MODE_TELEMETRY };
+    static const int drive_x[4] = { 6, 80, 140, 196 };
 
-    for (int i = 0; i < MODE_COUNT; i++) {
-        uint32_t c = (g_mode == i) ? QV_TEXT : QV_DIM;
-        int x = tab_x[i];
-        gfx_text(x, 8, tabs[i], c, 1);
-        if (g_mode == i) {
-            gfx_rect((float)x, 20.0f,
-                     (float)gfx_text_width(tabs[i], 1), 2.0f,
-                     theme_is_game() ? theme_accent() : QV_RED);
+    if (mode_is_driving(g_mode)) {
+        for (int i = 0; i < 4; i++) {
+            const char *name = mode_name(drive_mode[i]);
+            int x = drive_x[i];
+            gfx_text(x, 8, name,
+                     (g_mode == drive_mode[i]) ? QV_TEXT : QV_DIM, 1);
+            if (g_mode == drive_mode[i]) {
+                gfx_rect((float)x, 20.0f,
+                         (float)gfx_text_width(name, 1), 2.0f,
+                         theme_is_game() ? theme_accent() : QV_RED);
+            }
         }
+    } else {
+        /* En una herramienta la barra dice donde estas y como volver. */
+        int w = gfx_text_width(mode_name(g_mode), 1);
+        gfx_text(6, 8, mode_name(g_mode), QV_TEXT, 1);
+        gfx_text(6 + w + 10, 8, tr("HERRAMIENTAS"), QV_DIM, 1);
+        gfx_text(6 + w + 10 + gfx_text_width(tr("HERRAMIENTAS"), 1) + 10, 8,
+                 tr("L/R: VOLVER"), QV_DIM, 1);
     }
 
     uint32_t dot = QV_CRIT;
@@ -6731,6 +6891,45 @@ static void draw_probe(void)
     }
 }
 
+/* Selector de pantallas (SELECT). Las lista todas con su proposito y su
+ * estado en este coche: lo que no se puede usar sale en gris y con el
+ * motivo, porque ocultarlo no ensena nada. */
+static void draw_picker(void)
+{
+    int y = 44;
+
+    gfx_rect(0.0f, 0.0f, (float)GFX_W, (float)GFX_H, QV_BG);
+    gfx_rect(0.0f, 0.0f, (float)GFX_W, 26.0f, QV_PANEL);
+    gfx_text(8, 8, tr("PANTALLAS"), QV_TEXT, 1);
+    gfx_text_right(GFX_W - 8, 8, tr("X: ABRIR   SELECT: CERRAR"), QV_DIM, 1);
+    gfx_rect(8.0f, 30.0f, (float)GFX_W - 16.0f, 1.0f, QV_TRACK);
+
+    for (int i = 0; i < MODE_COUNT; i++) {
+        int mode = g_picker_order[i];
+        int avail = screen_available(mode);
+        int sel = (i == g_picker_sel);
+
+        if (i == 4) {
+            gfx_text(14, y, tr("HERRAMIENTAS"), QV_DIM, 1);
+            y += 14;
+        }
+        if (sel) {
+            gfx_rect(4.0f, (float)y - 3.0f, (float)GFX_W - 8.0f, 20.0f,
+                     QV_PANEL2);
+            gfx_rect(4.0f, (float)y - 3.0f, 3.0f, 20.0f,
+                     theme_is_game() ? theme_accent() : QV_RED);
+        }
+        gfx_text(14, y, mode_name(mode), avail ? QV_TEXT : QV_DIM, 1);
+        gfx_text(120, y, mode_purpose(mode), QV_DIM, 1);
+        if (!avail) {
+            gfx_text_right(GFX_W - 12, y, screen_reason(mode), QV_AMBER, 1);
+        } else if (mode == g_mode) {
+            gfx_text_right(GFX_W - 12, y, tr("ACTUAL"), QV_OK, 1);
+        }
+        y += 24;
+    }
+}
+
 static void draw_modules(void)
 {
     /* En la lista de resultados la cabecera la forma la linea de
@@ -7571,6 +7770,10 @@ static void draw_screen(uint32_t now, int requests, int data_count,
     }
     draw_net_banner();
 
+    if (g_picker_open) {
+        draw_picker();
+    }
+
     if (g_settings_open && !g_edit_open) {
         draw_settings_overlay();
     }
@@ -7643,11 +7846,11 @@ static int handle_mode_input(unsigned int pressed)
     int changed = 0;
 
     if (pressed & (PSP_CTRL_RTRIGGER | PSP_CTRL_RIGHT)) {
-        g_mode = (g_mode + 1) % MODE_COUNT;
+        g_mode = mode_step(g_mode, 1);
         changed = 1;
     }
     if (pressed & (PSP_CTRL_LTRIGGER | PSP_CTRL_LEFT)) {
-        g_mode = (g_mode + MODE_COUNT - 1) % MODE_COUNT;
+        g_mode = mode_step(g_mode, -1);
         changed = 1;
     }
 
@@ -7978,7 +8181,46 @@ static int handle_ui_input(unsigned int pressed)
         return handle_tel_edit_input(pressed);
     }
 
-    if (pressed & (PSP_CTRL_SELECT | PSP_CTRL_START)) {
+    /* Con el menu de ajustes abierto el mando es del menu. */
+    if (g_settings_open) {
+        return handle_settings_input(pressed);
+    }
+
+    /* Selector de pantallas: SELECT. El menu de ajustes se queda en
+     * START, que es lo que SELECT tambien hacia hasta ahora. */
+    if (g_picker_open) {
+        if (pressed & (PSP_CTRL_SELECT | PSP_CTRL_CIRCLE)) {
+            g_picker_open = 0;
+            return 1;
+        }
+        if (pressed & PSP_CTRL_UP) {
+            g_picker_sel = picker_step(g_picker_sel, -1);
+            return 1;
+        }
+        if (pressed & PSP_CTRL_DOWN) {
+            g_picker_sel = picker_step(g_picker_sel, 1);
+            return 1;
+        }
+        if (pressed & (PSP_CTRL_CROSS | PSP_CTRL_START)) {
+            int m = g_picker_order[g_picker_sel];
+            if (screen_available(m)) {
+                g_mode = m;
+                g_picker_open = 0;
+                apply_screen_schedule(now_ms());
+                log_file_printf("Pantalla: %s\n", mode_name(m));
+            }
+            return 1;
+        }
+        return 1;
+    }
+
+    if (pressed & PSP_CTRL_SELECT) {
+        g_picker_open = 1;
+        g_picker_sel = picker_index_of(g_mode);
+        return 1;
+    }
+
+    if (pressed & PSP_CTRL_START) {
         if (!g_settings_open) {
             g_settings_open = 1;
             g_settings_sel = 0;
@@ -7989,9 +8231,6 @@ static int handle_ui_input(unsigned int pressed)
         return 1;
     }
 
-    if (g_settings_open) {
-        return handle_settings_input(pressed);
-    }
 
     return handle_mode_input(pressed);
 }
@@ -8214,9 +8453,8 @@ static void run_dashboard(Target *targets, int target_count)
         if (g_exit_request) {
             g_exit_request = 0;
             log_file_printf("Salida solicitada desde el menu\n");
-            if (g_cfg.boost_auto) {
-                settings_save();
-            }
+            /* Guardar al salir sella la pantalla donde se dejo. */
+            settings_save();
             break;
         }
 
@@ -8522,6 +8760,12 @@ static void run_dashboard(Target *targets, int target_count)
              * la tarjeta tambien cada segundo. Si la app muere sin
              * cerrar, se pierde como mucho el ultimo segundo de log. */
             log_sync();
+            /* Un cambio de pantalla se escribe una sola vez, aqui: asi
+             * "arrancar donde lo deje" tambien vale con L/R. */
+            if (g_last_saved_mode != g_mode) {
+                g_last_saved_mode = g_mode;
+                settings_save();
+            }
             gap_acc = 0;
             gap_n = 0;
         }
@@ -8566,6 +8810,12 @@ int main(void)
     /* Paleta y estado inicial, aun sin GU. */
     settings_load();
     proto_load();
+    /* Se arranca donde se quedo, pero solo si era una pantalla de
+     * conduccion: abrir siempre en SNIFFER no sirve al conducir. */
+    g_mode = mode_is_driving(g_last_mode) ? g_last_mode : MODE_QV;
+    /* Ya esta en disco: no hace falta reescribirlo en el primer tick. */
+    g_last_saved_mode = g_mode;
+    log_file_printf("Pantalla inicial: %s\n", mode_name(g_mode));
     obd_store_init(&g_store);
     boost_init(&g_boost, PROFILE_BARO_FALLBACK_KPA);
 
