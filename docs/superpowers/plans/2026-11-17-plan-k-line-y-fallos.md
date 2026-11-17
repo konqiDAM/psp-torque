@@ -148,6 +148,15 @@ K2 (periods)  ->  K3 (panel)
 K2 goes first because it changes the timings of everything else. K4 is independent and
 can be done at any time. F5 needs nothing beyond a screen to live on.
 
+## 6. UI, preferences and vehicle profiles (spec, not started)
+`docs/superpowers/specs/2026-11-17-ui-screens-preferences-and-vehicle-profiles-design.md`
+covers the next block of work: a two-tier screen model with a picker on SELECT (which
+today duplicates START), preferences v2 including the start screen and per-car layouts,
+and vehicle detection from protocol and masks with a manual override.
+It overlaps two packages above and should be scheduled with them: K3 decides which gauge
+goes in the centre, U4 decides how that choice is made automatically, and K2's per-link
+periods are what U4's profile table ends up storing. Order once approved: U1 picker, U2
+bar and availability, U3 preferences, U4 detection, U5 localisation.
 ## 4. Working conventions
 
 - New code, comments, documents and commit messages are in **English**. The repository's

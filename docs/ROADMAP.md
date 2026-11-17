@@ -258,24 +258,6 @@ the MiTo's 50-67 ms and 12-14 req/s. What was measured is in
 - [ ] **K5 - Link stability.** Two drops in five minutes in `phase1_003` (at 157 s and
   233 s), the second one never recovered. Separate adapter, PSP WiFi and car, and decide
   whether reconnecting needs more than the current three attempts.
-- [ ] **K6 - Bilingual screens.** The `SONDA` screen was written with Spanish literals;
-  the app already has an ES/EN table behind `tr()`. Route its labels through `tr()` and
-  add the English entries, so the screen follows the language setting like the rest.
-
-## Phase 5 - On-board diagnostics (FALLOS screen)
-
-Goal: have the app say why the check-engine lamp came on. Today it only shows live data
-and PID `21` (distance with MIL); it never reads codes.
-
-- [ ] Read PID `01` (MIL state and number of stored codes).
-- [ ] Mode `03`: stored codes, decoded to P0xxx with a local description table.
-- [ ] Mode `07`: pending codes. Mode `0A`: permanent codes.
-- [ ] Mode `02`: freeze frame for the first code (a snapshot of the data at the fault).
-- [ ] Mode `06`: on-board monitor results (pass/fail).
-- [ ] Read-only throughout. Mode `04` (clear) and mode `08` are never sent.
-
-Criterion: on a car with the lamp on, the screen shows the same code as a commercial
-reader, and with no codes it says so explicitly instead of showing an empty list.
 
 ## Fase 3 — Parámetros específicos Alfa Romeo (investigación)
 
@@ -302,6 +284,48 @@ Criterios de aceptación:
 - Gestión de energía y aviso de batería baja.
 - Empaquetado (`EBOOT.PBP`, icono, manual).
 - Pruebas de uso real: montaje, legibilidad con sol, guantes, acompañante.
+
+## Phase 5 - On-board diagnostics (FALLOS screen)
+
+Goal: have the app say why the check-engine lamp came on. Today it only shows live data
+and PID `21` (distance with MIL); it never reads codes.
+
+- [ ] Read PID `01` (MIL state and number of stored codes).
+- [ ] Mode `03`: stored codes, decoded to P0xxx with a local description table.
+- [ ] Mode `07`: pending codes. Mode `0A`: permanent codes.
+- [ ] Mode `02`: freeze frame for the first code (a snapshot of the data at the fault).
+- [ ] Mode `06`: on-board monitor results (pass/fail).
+- [ ] Read-only throughout. Mode `04` (clear) and mode `08` are never sent.
+
+Criterion: on a car with the lamp on, the screen shows the same code as a commercial
+reader, and with no codes it says so explicitly instead of showing an empty list.
+
+## Phase 6 - UI, preferences and vehicle profiles
+
+Goal: stop navigating eight tabs with two triggers, make SELECT carry its own job, keep
+the layout per car, and let the app work out which car it is in. Full design in
+`docs/superpowers/specs/2026-11-17-ui-screens-preferences-and-vehicle-profiles-design.md`.
+
+- [ ] **U1 - Screen picker on SELECT.** SELECT currently duplicates START (verified in
+  `handle_ui_input`: both open the settings overlay). It opens a picker with every screen,
+  its purpose and its availability; X or START opens the chosen one.
+- [ ] **U2 - Two-tier bar.** GENERAL, MOTOR, TELEM and DIAG are the driving tier, cycled
+  with L/R and shown in the bar. MODULOS, SNIFFER, SONDA and INFO move to the tools tier,
+  reached through the picker. Screens the car cannot use are not offered, with the reason
+  shown in the picker.
+- [ ] **U3 - Preferences v2.** `version=2` line, `start` (a screen name or `last`), `last`,
+  `hidden`, and per-vehicle keys `v.<id>.<key>` for layout and tacho. Existing keys keep
+  working as global defaults.
+- [ ] **U4 - Vehicle profiles.** A table in `src/core/vehicle.c` with the MiTo and the
+  MX-5 plus two generic fallbacks, matched on protocol and masks, overridable by hand, and
+  logged as one line per session with the evidence. The centre gauge follows capability:
+  BOOST, MAF or LOAD.
+- [ ] **U5 - New screens in both languages.** Route the SONDA labels (and anything added
+  from here) through `tr()` instead of literals, so the screen follows the language setting like the rest.
+
+Criterion: on the MX-5 the bar shows four driving screens, SNIFFER is not offered, the
+layout is the MX-5's own, the app opens on the preferred screen, and the log names the car
+and the masks it was recognised by. On the MiTo nothing changes except the bar.
 
 ## Fuera de alcance
 
