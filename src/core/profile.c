@@ -209,3 +209,119 @@ const obd_poll_def PROFILE_ENGINE_POLL[] = {
 
 const int PROFILE_ENGINE_POLL_COUNT =
     (int)(sizeof(PROFILE_ENGINE_POLL) / sizeof(PROFILE_ENGINE_POLL[0]));
+
+/* ------------------------------------------------------------------ */
+/* FASE K2: reparto por capacidad del enlace.                         */
+/* ------------------------------------------------------------------ */
+
+float obd_profile_link_class(int proto_class)
+{
+    /* vehicle.h: OBD_PROTO_CAN == 0, ISO 9141-2 == 3, KWP == 5. Todo lo
+     * que no sea CAN se planifica como K-line. */
+    return (proto_class == 0) ? PROFILE_LINK_CLASS_CAN
+                              : PROFILE_LINK_CLASS_KLINE;
+}
+
+float obd_capacity_next(float current, float rate, float demand, float ceiling)
+{
+    if (rate <= 0.0f || demand <= 0.0f) {
+        return current;
+    }
+
+    /* El enlace no sostuvo lo pedido: la capacidad es lo entregado. Solo
+     * recorta, nunca sube, para que un pico no dispare el plan. */
+    if (rate < demand * 0.85f) {
+        float next = (rate < current) ? rate : current;
+        if (next > ceiling) {
+            next = ceiling;
+        }
+        if (next < PROFILE_LINK_RATE_FLOOR) {
+            next = PROFILE_LINK_RATE_FLOOR;
+        }
+        return next;
+    }
+
+    /* Sostuvo lo pedido con holgura: se puede aspirar a mas. Sube un 10%
+     * por ventana, con tope en el techo de la clase. */
+    if (rate > demand * 0.97f) {
+        float next = current * 1.10f;
+        if (next > ceiling) {
+            next = ceiling;
+        }
+        return next;
+    }
+
+    /* Zona muerta: ni sube ni baja. */
+    return current;
+}
+
+void obd_plan_init(obd_link_plan *plan, float capacity, uint16_t service_ms,
+                   float demand)
+{
+    if (plan == NULL) {
+        return;
+    }
+    if (capacity < PROFILE_LINK_RATE_FLOOR) {
+        capacity = PROFILE_LINK_RATE_FLOOR;
+    }
+    plan->capacity = capacity;
+    plan->service_ms = service_ms;
+    plan->budget = capacity * PROFILE_LINK_UTILIZATION;
+    plan->compressed = (demand > plan->budget) ? 1 : 0;
+}
+
+uint16_t obd_plan_period(const obd_link_plan *plan, uint8_t pid, int visible,
+                         int rank, int value_count)
+{
+    uint16_t base = obd_profile_base_period(pid);
+    if (base == 0) {
+        return 0;
+    }
+
+    /* Sin compresion el plan ES la tabla base. Es lo que deja al MiTo y a
+     * cualquier enlace con capacidad de sobra exactamente como estaban. */
+    if (plan == NULL || !plan->compressed) {
+        return obd_profile_period(pid, visible);
+    }
+
+    float service = (float)plan->service_ms;
+    float rate;
+
+    if (pid == 0x0C) {
+        rate = PROFILE_PLAN_RPM_HZ;
+        if (rate > plan->budget) {
+            rate = plan->budget;
+        }
+    } else if (visible && rank >= 1 && value_count >= 1 &&
+               rank <= PROFILE_PLAN_MAX_VALUES) {
+        /* Lo que queda del presupuesto, a partes iguales entre los valores
+         * de la pantalla. Si no hay ninguno, no hay nada que repartir. */
+        float left = plan->budget - PROFILE_PLAN_RPM_HZ;
+        int n = (value_count < PROFILE_PLAN_MAX_VALUES) ? value_count
+                                                       : PROFILE_PLAN_MAX_VALUES;
+        rate = (left > 0.0f) ? left / (float)n : 0.0f;
+    } else {
+        /* Fuera de pantalla o por encima del cupo: una peticion por
+         * minuto, que es lo que aguanta el enlace. */
+        return PROFILE_PLAN_BG_PERIOD_MS;
+    }
+
+    if (rate <= 0.0f) {
+        return PROFILE_PLAN_BG_PERIOD_MS;
+    }
+
+    /* El planificador cuenta el periodo desde el fin de la respuesta
+     * (obd_sched_end), asi que el tiempo de servicio se cuenta dos veces
+     * si no se resta: 1 Hz con 532 ms de servicio no es 1000 ms. */
+    float period = 1000.0f / rate - service;
+    if (period < 100.0f) {
+        period = 100.0f;
+    }
+    if (period > (float)PROFILE_PLAN_BG_PERIOD_MS) {
+        period = (float)PROFILE_PLAN_BG_PERIOD_MS;
+    }
+    if (period < (float)base) {
+        period = (float)base;
+    }
+    return (uint16_t)(period + 0.5f);
+}

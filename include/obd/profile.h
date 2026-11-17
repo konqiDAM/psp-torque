@@ -131,4 +131,72 @@ typedef struct {
 void obd_forced_set_add(obd_forced_set *set, uint8_t pid);
 int obd_forced_set_has(const obd_forced_set *set, uint8_t pid);
 
+/* FASE K2: reparto por capacidad del enlace.
+ *
+ * La tabla de periodos de arriba esta calibrada para un CAN que entrega
+ * 12-14 peticiones/s. Un coche de K-line entrega 1,9, y con la misma tabla
+ * el RPM se refresca cada 4,4 s (medido en phase1_003). La causa no es
+ * solo la falta de ancho de banda: el planificador sirve primero lo que
+ * lleva mas tiempo vencido, y un PID de periodo corto casi nunca se atrasa,
+ * asi que los de periodo largo le pasan por delante.
+ *
+ * Aqui va la aritmetica pura (sin PSP, sin ELM, sin estado global) para
+ * probarla: capacidad por clase de protocolo, presupuesto util, y el
+ * periodo que le toca a cada PID cuando la tabla no cabe. Con capacidad de
+ * CAN el plan devuelve exactamente obd_profile_period(), que es lo que deja
+ * al MiTo sin cambios. */
+
+/* Porcentaje de la capacidad que se planea usar: el resto es el margen
+ * para no tener el enlace saturado y para los comandos del menu. */
+#define PROFILE_LINK_UTILIZATION 0.85f
+
+/* Capacidad de cada clase de protocolo, en peticiones/s. CAN es el valor
+ * ya medido sobre el MiTo; K-line, el medido sobre la MX-5 (1,9 req/s con
+ * 383 ms de ida y vuelta), redondeado hacia arriba para no arrancar por
+ * debajo de lo que el coche da. */
+#define PROFILE_LINK_CLASS_CAN   16.5f
+#define PROFILE_LINK_CLASS_KLINE 2.2f
+
+/* Suelo del estimador: por debajo de esto no se planifica, porque un
+ * golpe de timeouts dejaria el plan en un solo PID. */
+#define PROFILE_LINK_RATE_FLOOR 0.8f
+
+/* Lo que el plan garantiza: RPM a 1 Hz y hasta tres valores de la pantalla
+ * activa con el resto. Cuatro valores a 0,5 Hz mas el RPM son 3 req/s, que
+ * este enlace no tiene (1,879 medidos): por eso son tres. */
+#define PROFILE_PLAN_RPM_HZ      1.0f
+#define PROFILE_PLAN_MAX_VALUES  3
+
+/* Un PID que no esta en pantalla, cuando hay que repartir. */
+#define PROFILE_PLAN_BG_PERIOD_MS 60000u
+
+typedef struct {
+    float capacity;      /* req/s estimadas del enlace */
+    float budget;        /* capacidad por PROFILE_LINK_UTILIZATION */
+    uint16_t service_ms; /* tiempo medio por peticion en este enlace */
+    int compressed;      /* 1 = hay que repartir; 0 = tabla base tal cual */
+} obd_link_plan;
+
+/* Capacidad de partida segun la clase de protocolo (OBD_PROTO_* de
+ * vehicle.h: CAN, o cualquier cosa de K-line). */
+float obd_profile_link_class(int proto_class);
+
+/* Capacidad nueva a partir de la ventana anterior: 'rate' es lo que el
+ * enlace entrego de verdad y 'demand' lo que se le pidio. Baja cuando no
+ * llego, sube despacio cuando sostuvo lo pedido, y se queda igual en el
+ * medio (zona muerta, para no oscilar). Nunca pasa del techo de la clase
+ * ni baja del suelo. */
+float obd_capacity_next(float current, float rate, float demand, float ceiling);
+
+/* Prepara el plan: 'demand' es la demanda de la pantalla activa en req/s
+ * (obd_profile_demand) para decidir si hace falta repartir. */
+void obd_plan_init(obd_link_plan *plan, float capacity, uint16_t service_ms,
+                   float demand);
+
+/* Periodo de un PID segun el plan. 'rank' ordena los valores de la
+ * pantalla activa (1 = el primero); los que pasan de
+ * PROFILE_PLAN_MAX_VALUES van a fondo, igual que los que no se ven. */
+uint16_t obd_plan_period(const obd_link_plan *plan, uint8_t pid, int visible,
+                         int rank, int value_count);
+
 #endif
