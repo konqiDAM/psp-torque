@@ -63,6 +63,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define CONFIG_PATH SAVEDATA_DIR "/host.txt"
 #define LOG_PREFIX LOG_DIR "/phase1_"
 #define SETTINGS_PATH SAVEDATA_DIR "/settings.txt"
+#define SETTINGS_TMP_PATH SAVEDATA_DIR "/settings.tmp"
 /* Protocolo forzado, opcional: un numero (3 = ISO 9141-2, 5 = KWP
  * init rapido, 6 = CAN 11/500, 7 = CAN 29/500). Vacio = automatico. */
 #define PROTO_PATH SAVEDATA_DIR "/protocol.txt"
@@ -436,29 +437,41 @@ static const int g_elm_gap_values[7] = { 0, 2, 4, 6, 8, 12, 17 };
 static int g_elm_min_gap_ms = ELM_GAP_DEFAULT_MS;
 static uint32_t g_last_resp_ms = 0;   /* anclaje del hueco */
 
-static float tach_max_rpm(void)
-{
-    return (float)g_cfg.rpm_max;
-}
-
 /* Lo que aporta el perfil del coche (FASE U4): si esta a 0 se usa el
  * criterio de siempre, para que un coche sin perfil no cambie nada. */
 static int g_profile_redline = 0;   /* inicio de la zona roja */
 static int g_profile_cut = 0;       /* corte de inyeccion */
+static int g_profile_tach = 0;      /* fondo de escala, o 0 = el del ajuste */
+
+static float tach_max_rpm(void)
+{
+    return (float)((g_profile_tach > 0) ? g_profile_tach : g_cfg.rpm_max);
+}
+
+/* Lo que aporta el coche no se escribe en settings.txt: son hechos del
+ * vehiculo, no preferencias. Si el usuario toca el tacometro en el menu,
+ * manda el suyo hasta la proxima conexion. */
+static void vehicle_release_tacho(void)
+{
+    g_profile_tach = 0;
+    g_profile_redline = 0;
+    g_profile_cut = 0;
+}
 
 static float redline_rpm(void)
 {
-    if (g_profile_redline > 0 && g_profile_redline < g_cfg.rpm_max) {
+    int tach = (int)tach_max_rpm();
+    if (g_profile_redline > 0 && g_profile_redline < tach) {
         return (float)g_profile_redline;
     }
     /* Zona roja automatica: 500 rpm antes del fondo de escala. Con el
      * ajuste por defecto (7000) queda en 6500, como el corte habitual. */
-    int r = g_cfg.rpm_max - 500;
+    int r = tach - 500;
     if (r < 2000) {
         r = 2000;
     }
-    if (r > g_cfg.rpm_max - 200) {
-        r = g_cfg.rpm_max - 200;
+    if (r > tach - 200) {
+        r = tach - 200;
     }
     return (float)r;
 }
@@ -1188,7 +1201,11 @@ static void settings_load(void)
 
 static void settings_save(void)
 {
-    SceUID fd = sceIoOpen(SETTINGS_PATH,
+    /* Se escribe al lado y se renombra: si se corta la corriente a mitad,
+     * el archivo bueno sigue entero. Con PSP_O_TRUNC sobre el de verdad,
+     * un corte dejaba settings.txt en cero y se perdian tema, idioma,
+     * huecos y perfil de golpe. */
+    SceUID fd = sceIoOpen(SETTINGS_TMP_PATH,
                           PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC,
                           0777);
     if (fd < 0) {
@@ -1271,6 +1288,13 @@ static void settings_save(void)
     }
     sceIoSync("ms0:", 0);
     sceIoClose(fd);
+
+    sceIoRemove(SETTINGS_PATH);
+    int renamed = sceIoRename(SETTINGS_TMP_PATH, SETTINGS_PATH);
+    if (renamed < 0) {
+        log_file_printf("Ajustes: renombrar fallo (0x%08X)\n", renamed);
+        return;
+    }
 
     log_file_printf("Ajustes guardados: tema=%s contraste=%d animacion=%s\n",
                     gfx_theme_name(g_cfg.theme), g_cfg.contrast,
@@ -2516,9 +2540,11 @@ static void vehicle_detect(void)
     }
 
     /* Un perfil generico no toca nada: el tacometro y la zona roja se
-     * quedan como los tenga el usuario, que es lo que habia antes. */
+     * quedan como los tenga el usuario. Y lo detectado no se escribe en
+     * settings.txt: si un dia no hay coche, sigue valiendo lo suyo. */
+    vehicle_release_tacho();
     if (!p->generic) {
-        g_cfg.rpm_max = p->rpm_max;
+        g_profile_tach = p->rpm_max;
         g_profile_redline = p->redline;
         g_profile_cut = p->fuel_cut;
     }
@@ -2526,9 +2552,13 @@ static void vehicle_detect(void)
     log_file_printf("Vehiculo: %s (%s, proto %s, mascaras %08X/%08X/%08X)"
                     " tacometro=%d rojo=%d corte=%d\n",
                     p->name,
-                    g_cfg.profile[0] ? "forzado" : (exact ? "detectado" : "generico"),
+                    (g_cfg.profile[0] &&
+                     obd_vehicle_by_id(g_cfg.profile) != NULL)
+                        ? "forzado" : (exact ? "detectado" : "generico"),
                     g_proto, g_mask1, g_mask2, g_mask3,
-                    g_cfg.rpm_max, p->redline, p->fuel_cut);
+                    (int)tach_max_rpm(),
+                    p->generic ? g_profile_redline : p->redline,
+                    p->generic ? g_profile_cut : p->fuel_cut);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2707,6 +2737,15 @@ static void build_scheduler(void)
 
     apply_support_masks();
     vehicle_detect();
+
+    /* Si la pantalla en la que estabamos no vale para este coche (p. ej.
+     * SNIFFER elegido antes de conectar con un K-line), se vuelve a
+     * GENERAL: quedarse ahi ofrece un boton que habla CAN en un bus que no
+     * lo es. */
+    if (!mode_is_driving(g_mode) && !screen_available(g_mode)) {
+        g_mode = MODE_QV;
+        g_picker_open = 0;
+    }
 
     log_file_printf("Acelerador: 0x%02X (%s), pedal=%s\n",
                     g_thr_pid, g_thr_label,
@@ -7335,7 +7374,7 @@ static void draw_theme_fx(const dash_data *d, uint32_t now)
 
         /* Con perfil, el aviso salta al acercarse al corte real; sin el,
          * 150 rpm antes de la zona roja como siempre. */
-        float warn_rpm = g_profile_cut > 0 ? (float)g_profile_cut - 100.0f
+        float warn_rpm = g_profile_cut > 0 ? (float)g_profile_cut - 300.0f
                                           : redline_rpm() - 150.0f;
         if (d->rpm_valid && d->rpm_val >= warn_rpm && ((now / 140u) & 1u)) {
             gfx_border(0, 0, (float)GFX_W, (float)GFX_H, 2.0f, QV_RED);
@@ -7929,7 +7968,7 @@ static int handle_mode_input(unsigned int pressed)
     }
 
     if (g_mode == MODE_MODULES && !g_settings_open) {
-        if (pressed & PSP_CTRL_CROSS) {
+        if ((pressed & PSP_CTRL_CROSS) && screen_available(MODE_MODULES)) {
             g_scan_request = 1;
             changed = 1;
         }
@@ -8015,6 +8054,15 @@ static int handle_mode_input(unsigned int pressed)
 static int handle_settings_input(unsigned int pressed)
 {
     int changed = 0;
+
+    /* START cierra el menu: es lo que dice el pie de la pantalla y lo que
+     * hacia antes de que SELECT se quedase el selector de pantallas. Sin
+     * esto el mando parece muerto con el menu abierto. */
+    if (pressed & (PSP_CTRL_START | PSP_CTRL_SELECT)) {
+        g_settings_open = 0;
+        settings_save();
+        return 1;
+    }
 
     if (pressed & PSP_CTRL_CROSS) {
         if (g_settings_sel == 6) {
@@ -8107,7 +8155,10 @@ static int handle_settings_input(unsigned int pressed)
                 g_cfg.shift_rpm = g_cfg.rpm_max;
             }
         } else if (g_settings_sel == 9) {
-            g_cfg.rpm_max += dir * 500;
+            /* Ajustar el tacometro a mano devuelve el mando al usuario
+             * hasta la proxima conexion, cuando se vuelve a detectar. */
+            g_cfg.rpm_max = (int)tach_max_rpm() + dir * 500;
+            vehicle_release_tacho();
             if (g_cfg.rpm_max < 4000) g_cfg.rpm_max = 4000;
             if (g_cfg.rpm_max > 9000) g_cfg.rpm_max = 9000;
             if (g_cfg.shift_rpm > g_cfg.rpm_max) {
@@ -8468,10 +8519,13 @@ static void run_dashboard(Target *targets, int target_count)
             chord_done = 0;
         }
 
-        /* Reintento de conexion; deshabilitado con los ajustes abiertos. */
+        /* Reintento de conexion; deshabilitado con los ajustes abiertos.
+         * El selector de pantallas se cierra antes: si no, taparia el
+         * aviso de CONECTANDO y SELECT pasaria a cancelar la conexion. */
         if (!g_settings_open &&
             (pressed & (PSP_CTRL_TRIANGLE | PSP_CTRL_SQUARE))) {
             int with_dialog = (pressed & PSP_CTRL_SQUARE) ? 1 : 0;
+            g_picker_open = 0;
 
             if (g_demo) {
                 demo_toggle();

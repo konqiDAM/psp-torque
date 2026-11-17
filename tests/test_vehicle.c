@@ -71,10 +71,11 @@ void test_vehicle(void)
     CHECK(exact == 0);
     CHECK(p->generic == 1);
 
-    /* Sin protocolo tampoco. */
+    /* Sin protocolo tampoco, y ademas el resultado es generico. */
     p = obd_vehicle_match(OBD_PROTO_ANY, 0xBE1FB811u, 0x80000000u, 0u,
                           NULL, &exact);
     CHECK(exact == 0);
+    CHECK(p->generic == 1);
 
     /* Forzado por id: manda sobre lo detectado. */
     p = obd_vehicle_match(OBD_PROTO_CAN, 0xBE3EB811u, 0x80022001u,
@@ -83,6 +84,27 @@ void test_vehicle(void)
     CHECK(exact == 0);
     p = obd_vehicle_match(OBD_PROTO_CAN, 0u, 0u, 0u, "GENERIC_CAN", &exact);
     CHECK(strcmp(p->id, "GENERIC_CAN") == 0);
+
+    /* El comodin es 0xFFFFFFFF: un mask3 distinto de cero NO es la MX-5,
+     * porque el perfil exige que ese bloque no exista. */
+    p = obd_vehicle_match(OBD_PROTO_ISO9141, 0xBE1FB811u, 0x80000000u,
+                          0xDEADBEEFu, NULL, &exact);
+    CHECK(strcmp(p->id, "MAZDA_MX5_NB2") != 0);
+    CHECK(exact == 0);
+
+    /* Forzado con un id que no existe: no se fuerza nada y se detecta. */
+    p = obd_vehicle_match(OBD_PROTO_ISO9141, 0xBE1FB811u, 0x80000000u, 0u,
+                          "NO_EXISTE", &exact);
+    CHECK(strcmp(p->id, "MAZDA_MX5_NB2") == 0);
+    CHECK(exact == 1);
+
+    /* Clases que el ATDPN puede devolver en otros coches. */
+    CHECK(obd_vehicle_proto_class("A4") == OBD_PROTO_ISO9141);
+    CHECK(obd_vehicle_proto_class("AC") == OBD_PROTO_CAN);
+    CHECK(obd_vehicle_proto_class("AB") == OBD_PROTO_CAN);
+    /* "A0": el adaptador aun no ha elegido protocolo, no es un coche. */
+    CHECK(obd_vehicle_proto_class("A0") == OBD_PROTO_ANY);
+    CHECK(obd_vehicle_proto_class("0") == OBD_PROTO_ANY);
 
     /* Un id que no existe no fuerza nada. */
     CHECK(obd_vehicle_by_id("NO_EXISTE") == NULL);

@@ -27,11 +27,15 @@
 #define OBD_CENTRE_LOAD      2
 #define OBD_CENTRE_FROM_CAPS 3  /* generico: lo decide la mascara */
 
+/* Comodin para una mascara que no importa. El cero NO es comodin: un
+ * perfil puede exigir que un bloque no exista (la MX-5 no tiene 0140). */
+#define OBD_VEHICLE_ANY_MASK 0xFFFFFFFFu
+
 typedef struct {
     const char *id;      /* "MAZDA_MX5_NB2", el nombre que se escribe en profile= */
     const char *name;    /* "Mazda MX-5 NB2" */
     int proto;           /* OBD_PROTO_* */
-    uint32_t mask1;      /* 0 = no importa */
+    uint32_t mask1;      /* OBD_VEHICLE_ANY_MASK = no importa */
     uint32_t mask2;
     uint32_t mask3;
     int rpm_max;         /* fondo de escala del tacometro */

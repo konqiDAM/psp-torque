@@ -18,10 +18,10 @@ static const obd_vehicle_profile g_profiles[] = {
       0xBE1FB811u, 0x80000000u, 0x00000000u,
       8000, 7000, 7200, OBD_CENTRE_MAF, 0 },
     { "GENERIC_CAN", "Generic CAN", OBD_PROTO_CAN,
-      0, 0, 0,
+      OBD_VEHICLE_ANY_MASK, OBD_VEHICLE_ANY_MASK, OBD_VEHICLE_ANY_MASK,
       7000, 6500, 0, OBD_CENTRE_FROM_CAPS, 1 },
     { "GENERIC_KLINE", "Generic K-line", OBD_PROTO_KLINE,
-      0, 0, 0,
+      OBD_VEHICLE_ANY_MASK, OBD_VEHICLE_ANY_MASK, OBD_VEHICLE_ANY_MASK,
       7000, 6500, 0, OBD_CENTRE_FROM_CAPS, 1 }
 };
 
@@ -34,7 +34,11 @@ int obd_vehicle_proto_class(const char *atdpn)
     }
     size_t n = strlen(atdpn);
     switch (atdpn[n - 1]) {
+    case '0':
+        /* "A0": el adaptador todavia no ha elegido protocolo. */
+        return OBD_PROTO_ANY;
     case '3':
+    case '4':   /* ISO 14230-4, inicio a 5 baudios */
         return OBD_PROTO_ISO9141;
     case '5':
         return OBD_PROTO_KWP;
@@ -42,6 +46,9 @@ int obd_vehicle_proto_class(const char *atdpn)
     case '8':
     case '7':
     case '9':
+    case 'A':
+    case 'B':
+    case 'C':   /* CAN con las variantes de 29 bits anunciadas */
         return OBD_PROTO_CAN;
     default:
         return OBD_PROTO_ANY;
@@ -63,9 +70,11 @@ static int proto_matches(int want, int have)
     return want == have;
 }
 
+/* El comodin es OBD_VEHICLE_ANY_MASK, no el cero: un perfil puede exigir
+ * que un bloque NO exista (por ejemplo el 0140 de la MX-5). */
 static int mask_matches(uint32_t want, uint32_t have)
 {
-    return want == 0 || want == have;
+    return want == OBD_VEHICLE_ANY_MASK || want == have;
 }
 
 const obd_vehicle_profile *obd_vehicle_by_id(const char *id)
@@ -100,7 +109,7 @@ const obd_vehicle_profile *obd_vehicle_match(int proto, uint32_t mask1,
     if (mask1 != 0) {
         for (int i = 0; i < PROFILE_COUNT; i++) {
             const obd_vehicle_profile *p = &g_profiles[i];
-            if (p->generic || p->mask1 == 0) {
+            if (p->generic || p->mask1 == OBD_VEHICLE_ANY_MASK) {
                 continue;
             }
             if (proto_matches(p->proto, proto) &&
