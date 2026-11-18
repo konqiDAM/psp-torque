@@ -18,6 +18,7 @@ void test_vehicle(void);
 void test_scheduler_strict(void);
 void test_plan(void);
 void test_dtc(void);
+void test_splash_mx5(void);
 
 int g_failures = 0;
 
@@ -145,6 +146,7 @@ int main(void)
     test_vehicle();
     test_plan();
     test_dtc();
+    test_splash_mx5();
 
     if (g_failures != 0) {
         printf("%d comprobaciones fallidas\n", g_failures);
