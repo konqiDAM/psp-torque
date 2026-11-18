@@ -70,6 +70,16 @@ void test_vehicle(void)
     CHECK(p->fuel_cut == 7200);
     CHECK(p->centre == OBD_CENTRE_MAF);
 
+    /* Las mismas mascaras leidas antes de que el adaptador elija protocolo
+     * ("A0", justo despues de ATSP0) no identifican nada: es lo que dejo a
+     * la MX-5 como generica el 18/11/2026. La deteccion tiene que esperar
+     * al ATDPN concreto, y este par fija esa frontera. */
+    p = obd_vehicle_match(obd_vehicle_proto_class("A0"), 0xBE1FB811u,
+                          0x80000000u, 0u, NULL, &exact);
+    CHECK(p != NULL);
+    CHECK(strcmp(p->id, "GENERIC_KLINE") == 0);
+    CHECK(exact == 0);
+
     /* El MiTo sigue siendo el MiTo, con sus valores de siempre. */
     p = obd_vehicle_match(OBD_PROTO_CAN, 0xBE3EB811u, 0x80022001u,
                           0xC0C00000u, NULL, &exact);

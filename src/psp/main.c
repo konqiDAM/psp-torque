@@ -151,6 +151,7 @@ static int g_dtc_mil = -1;        /* -1 = no se ha leido */
 static int g_dtc_state = 0;       /* 0 sin leer, 1 leyendo, 2 leido */
 static int g_dtc_count = -1;
 static int g_ff_valid = 0;        /* la foto del fallo existe y se leyo */
+static int g_ff_offered = 0;      /* la ECU anuncia el modo 02 (0100) */
 static char g_vbat[24] = "?";
 static char g_ssid[32] = "";
 static char g_ip[24] = "";
@@ -370,7 +371,16 @@ static int g_link_connected = 0;
 #define ELM_STUCK_MIN 3      /* para mostrar "ELM ATASCADO" */
 #define ELM_STUCK_RECOVER 8  /* para escalar a reconexion */
 
+/* Una racha de NO DATA es otra cosa: el adaptador esta vivo y contesta,
+ * pero la centralita se ha callado. Los bytes llegan, asi que el contador
+ * de timeouts no lo ve, y la pantalla se queda en N/D para siempre (el
+ * 18/11/2026 se vieron 55 NO DATA seguidos, con la ultima lectura buena
+ * de rpm congelada en pantalla). Solo se recupera rehaciendo el
+ * handshake, que es lo que hace el camino de reconexion. */
+#define ELM_NO_DATA_RECOVER 20
+
 static int g_elm_stuck = 0;
+static int g_no_data_streak = 0;
 
 /* SELECT durante una conexion en curso la cancela (FASE D3). */
 static int g_connect_cancel = 0;
@@ -950,6 +960,7 @@ static const char *tr(const char *key)
         { "ULTIMA", "LAST" },
         { "FALLOS", "FAULTS" },
         { "CONGELADO", "FREEZE FRAME" },
+        { "SIN MODO 02", "NO MODE 02" },
         { "LOG COMPLETO", "FULL LOG" },
         { "Codigos de averia", "Fault codes" },
         { "GUARDADOS", "STORED" },
@@ -1886,7 +1897,8 @@ static void settings_save(void)
 
     log_file_printf("Ajustes guardados: tema=%s contraste=%d animacion=%s\n",
                     gfx_theme_name(g_cfg.theme), g_cfg.contrast,
-                    g_cfg.anim ? "SI" : "NO");
+                    g_cfg.anim == 0 ? "NO"
+                                    : (g_cfg.anim == 1 ? "MITO" : "MX-5"));
     log_sync();
 }
 
@@ -3126,6 +3138,20 @@ static void vehicle_detect(void)
     if (g_vehicle_seen) {
         return;
     }
+
+    /* Sin un ATDPN concreto no se afirma identidad: justo despues de
+     * ATSP0 el adaptador contesta "A0" (automatico, protocolo aun sin
+     * elegir) y en ese momento cualquier mascara casa con el generico.
+     * Como la deteccion se hace una sola vez por conexion, el coche se
+     * quedaba sin perfil para el resto de la sesion: paso el 18/11/2026
+     * con la MX-5, que salio como "Generic K-line" (tacometro 7000, sin
+     * zona roja y sin relaciones de cambio) mientras el ATDPN ya decia
+     * A3 dos lineas mas abajo en el log. */
+    if (obd_vehicle_proto_class(g_proto) == OBD_PROTO_ANY) {
+        log_file_printf("Vehiculo: pendiente (proto %s)\n", g_proto);
+        return;
+    }
+
     g_vehicle_seen = 1;
 
     int exact = 0;
@@ -3450,6 +3476,7 @@ static int connect_network_and_elm(Target *targets, int *target_count,
     g_link_connected = 0;
     g_connect_cancel = 0;
     g_elm_stuck = 0;
+    g_no_data_streak = 0;
 
     obd_store_init(&g_store);
     boost_init(&g_boost, PROFILE_BARO_FALLBACK_KPA);
@@ -3707,13 +3734,15 @@ static int connect_network_and_elm(Target *targets, int *target_count,
                     mito_encoding ? "MiTo (trims con signo, avance directo)"
                                   : "OBD estandar");
 
-    build_scheduler();
-
-    /* ATDPN antes de la primera peticion OBD puede devolver "A0"
-     * (automatico, protocolo aun sin detectar). Se relee ya con el
-     * protocolo real para que el escaneo UDS y la restauracion usen
-     * el valor correcto. */
+    /* El protocolo se relee ANTES de identificar el coche y de repartir
+     * la tabla: justo despues de ATSP0 el adaptador contesta "A0"
+     * (automatico, protocolo aun sin detectar). El 0100 de arriba ya le
+     * obligo a elegir, asi que aqui A0 solo aparece si el coche no
+     * contesta a nada. Antes se releia despues, y por eso ningun perfil
+     * casaba nunca (ver vehicle_detect). */
     scan_refresh_proto(sock, "conexion");
+
+    build_scheduler();
 
     g_link_connected = 1;
     g_net_busy = 0;
@@ -7886,7 +7915,14 @@ static void run_fallos(int sock)
     g_ff_speed = -1;
     g_ff_ect = -1;
     g_ff_load = -1;
-    if (g_dtc_stored_n > 0) {
+    g_ff_offered = 0;
+    if (g_dtc_stored_n > 0 && !obd_mask_supports(g_mask1, 0x02)) {
+        /* La MX-5 NB2 no anuncia el modo 02 (0100 = BE1FB811). Pedirlo
+         * gasta peticiones y deja la fila del congelado muda para
+         * siempre; mejor saberlo y decirlo en pantalla. */
+        log_file_printf("Congelado: la ECU no da el modo 02 (0100)\n");
+    } else if (g_dtc_stored_n > 0) {
+        g_ff_offered = 1;
         /* La respuesta del modo 02 lleva el numero de fotograma delante de
          * los datos: "42 PID FR D...". Con cabeceras apagadas y sin relleno
          * llegan cinco bytes; con relleno CAN llegan ocho. Se mira la
@@ -8038,6 +8074,10 @@ static void draw_fallos(void)
     }
 
     /* La foto del fallo, si la hay: es lo que estaba pasando cuando salto. */
+    if (!g_ff_valid && g_dtc_stored_n > 0 && !g_ff_offered) {
+        gfx_text(8, 232, tr("CONGELADO"), QV_CYAN, 1);
+        gfx_text(52, 232, tr("SIN MODO 02"), QV_DIM, 1);
+    }
     if (g_ff_valid) {
         gfx_text(8, 232, tr("CONGELADO"), QV_CYAN, 1);
         char a[12] = "N/D", b[12] = "N/D", c[12] = "N/D", e[12] = "N/D";
@@ -9803,6 +9843,12 @@ static void run_dashboard(Target *targets, int target_count)
                 g_elm_stuck = 0;
             }
 
+            if (reply->no_data || reply->unable) {
+                g_no_data_streak++;
+            } else if (got_data) {
+                g_no_data_streak = 0;
+            }
+
             obd_sched_end(&g_sched, rx_idx, t1,
                           (reply->no_data || reply->unable) ? 0 : 1);
 
@@ -9831,11 +9877,17 @@ static void run_dashboard(Target *targets, int target_count)
             if (g_elm_stuck >= ELM_STUCK_RECOVER) {
                 link_bad = 1;
             }
+            if (g_no_data_streak >= ELM_NO_DATA_RECOVER) {
+                link_bad = 1;
+            }
 
             if (link_bad) {
                     if (g_elm_stuck >= ELM_STUCK_RECOVER) {
                         log_file_printf("Enlace perdido: adaptador atascado "
                                         "en STOPPED (%d)\n", g_elm_stuck);
+                    } else if (g_no_data_streak >= ELM_NO_DATA_RECOVER) {
+                        log_file_printf("Enlace perdido: %d NO DATA "
+                                        "seguidos\n", g_no_data_streak);
                     } else {
                         log_file_printf("Enlace perdido: %s\n",
                                         reply->bytes == 0
@@ -9851,6 +9903,7 @@ static void run_dashboard(Target *targets, int target_count)
                     consecutive_timeouts = 0;
                     consecutive_errors = 0;
                     g_elm_stuck = 0;
+                    g_no_data_streak = 0;
 
                     /* D3: en lugar de bloquear 2 s y reconectar en el
                      * sitio (congelaba la GUI y dejaba el socket en un
@@ -9902,6 +9955,7 @@ static void run_dashboard(Target *targets, int target_count)
                     consecutive_timeouts = 0;
                     consecutive_errors = 0;
                     g_elm_stuck = 0;
+                    g_no_data_streak = 0;
                     last_rtt = -1;
                     g_hist_count = 0;
                     g_hist_pos = 0;
