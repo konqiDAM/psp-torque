@@ -39,6 +39,7 @@
 
 #include "obd/boost.h"
 #include "obd/discovery.h"
+#include "obd/dtc.h"
 #include "obd/elm327.h"
 #include "obd/pid.h"
 #include "obd/profile.h"
@@ -134,6 +135,14 @@ static int g_map_supported = 0;
 static int g_maf_supported = 0;
 static char g_elm[40] = "?";
 static char g_proto[32] = "?";
+
+/* FASE U3: pantalla de arranque elegida y herramientas ocultas. Van aqui
+ * arriba porque el selector las consulta antes que nada. */
+static int g_start_mode = -1;       /* -1 = la ultima pantalla (last=) */
+static uint8_t g_hidden_mask = 0;   /* bits MODE_* que no se ofrecen */
+/* Perfil detectado en esta sesion: clave de v.<id>.* y lo que decide si
+ * la vista es de este coche o la global. */
+static char g_vehicle_id[24] = "";
 static char g_vbat[24] = "?";
 static char g_ssid[32] = "";
 static char g_ip[24] = "";
@@ -163,7 +172,8 @@ static obd_smooth g_ema_thr;
 #define MODE_SNIFFER   5
 #define MODE_INFO      6
 #define MODE_PROBE     7   /* sonda del coche: solo diagnostico */
-#define MODE_COUNT     8
+#define MODE_FALLOS    8   /* codigos de averia, solo lectura */
+#define MODE_COUNT     9
 
 #define HIST_MAX 180
 
@@ -217,6 +227,7 @@ static const char *mode_name(int mode)
     case MODE_SNIFFER:   return tr("SNIFFER");
     case MODE_INFO:      return tr("INFO");
     case MODE_PROBE:     return tr("SONDA");
+    case MODE_FALLOS:    return tr("FALLOS");
     default:             return "";
     }
 }
@@ -233,6 +244,7 @@ static const char *mode_purpose(int mode)
     case MODE_SNIFFER:   return tr("Trafico del bus");
     case MODE_INFO:      return tr("Que es cada dato");
     case MODE_PROBE:     return tr("Probar un coche");
+    case MODE_FALLOS:    return tr("Codigos de averia");
     default:             return "";
     }
 }
@@ -263,6 +275,16 @@ static int screen_available(int mode)
     return scan_can();
 }
 
+/* Una pantalla oculta con hidden= no se ofrece en el selector, pero sigue
+ * siendo alcanzable si es la que estaba puesta. */
+static int screen_offered(int mode)
+{
+    if (mode >= 0 && mode < MODE_COUNT && (g_hidden_mask & (1u << mode))) {
+        return 0;
+    }
+    return screen_available(mode);
+}
+
 /* Motivo por el que una pantalla no esta disponible, o cadena vacia. */
 static const char *screen_reason(int mode)
 {
@@ -276,7 +298,7 @@ static const char *screen_reason(int mode)
  * herramientas. */
 static const int g_picker_order[MODE_COUNT] = {
     MODE_QV, MODE_ENGINE, MODE_MOTOR, MODE_TELEMETRY,
-    MODE_MODULES, MODE_SNIFFER, MODE_INFO, MODE_PROBE
+    MODE_MODULES, MODE_FALLOS, MODE_SNIFFER, MODE_INFO, MODE_PROBE
 };
 
 static int picker_index_of(int mode)
@@ -297,7 +319,7 @@ static int picker_step(int idx, int dir)
         if (ni < 0) {
             ni += MODE_COUNT;
         }
-        if (screen_available(g_picker_order[ni])) {
+        if (screen_offered(g_picker_order[ni])) {
             return ni;
         }
     }
@@ -636,6 +658,38 @@ static int g_tel_item[TEL_SLOTS] = {
 static int g_vehicle_centre = OBD_CENTRE_BOOST;
 static int g_layout_user = 0;        /* 1 = el usuario ha tocado la vista */
 
+/* FASE U3: preferencias v2.
+ *
+ * Tres cosas que van por coche o por persona y no por sesion:
+ *   - la vista de cada coche (v.<id>.slotN_item / telN_item), para que
+ *     ordenarla en la MX-5 no descoloque el MiTo;
+ *   - la pantalla de arranque (start=), un nombre o "last";
+ *   - las herramientas que no se usan (hidden=), que no salen en el
+ *     selector.
+ * Un fichero viejo sigue valiendo: lo que no aparece se queda como esta. */
+#define VEHICLE_PREFS_MAX 4
+
+typedef struct {
+    char id[24];
+    int has_layout;
+    int slot_item[DASH_SLOTS];
+    int slot_style[DASH_SLOTS];
+    int tel_item[TEL_SLOTS];
+    int has_tacho;
+    int rpm_max;
+    int shift_rpm;
+} vehicle_prefs;
+
+
+static vehicle_prefs g_car_prefs[VEHICLE_PREFS_MAX];
+static int g_car_prefs_count = 0;
+
+/* La vista global tal cual viene del fichero, para poder volver a ella
+ * cuando el coche no trae la suya. */
+static int g_global_slot_item[DASH_SLOTS];
+static int g_global_slot_style[DASH_SLOTS];
+static int g_global_tel_item[TEL_SLOTS];
+
 static int slot_item_eff(int i)
 {
     if (i < 0 || i >= DASH_SLOTS) {
@@ -716,6 +770,45 @@ static int layout_is_factory(void)
     return 1;
 }
 
+/* Preferencias de un coche por id; con 'create' se dan de alta. */
+static vehicle_prefs *car_prefs_for(const char *id, int create)
+{
+    if (id == NULL || id[0] == '\0') {
+        return NULL;
+    }
+    for (int i = 0; i < g_car_prefs_count; i++) {
+        if (strcmp(g_car_prefs[i].id, id) == 0) {
+            return &g_car_prefs[i];
+        }
+    }
+    if (!create || g_car_prefs_count >= VEHICLE_PREFS_MAX) {
+        return NULL;
+    }
+    vehicle_prefs *p = &g_car_prefs[g_car_prefs_count++];
+    memset(p, 0, sizeof(*p));
+    snprintf(p->id, sizeof(p->id), "%s", id);
+    return p;
+}
+
+/* Guarda la vista global y pone la del coche, si la tiene. */
+static void layout_apply_for_car(void)
+{
+    memcpy(g_slot_item, g_global_slot_item, sizeof(g_slot_item));
+    memcpy(g_slot_style, g_global_slot_style, sizeof(g_slot_style));
+    memcpy(g_tel_item, g_global_tel_item, sizeof(g_tel_item));
+
+    vehicle_prefs *p = car_prefs_for(g_vehicle_id, 0);
+    if (p != NULL && p->has_layout) {
+        memcpy(g_slot_item, p->slot_item, sizeof(g_slot_item));
+        memcpy(g_slot_style, p->slot_style, sizeof(g_slot_style));
+        memcpy(g_tel_item, p->tel_item, sizeof(g_tel_item));
+        /* La vista es de este coche: el overlay por capacidad no opina. */
+        g_layout_user = 1;
+    } else {
+        g_layout_user = !layout_is_factory();
+    }
+}
+
 static int g_edit_open = 0;
 static int g_edit_sel = 0;
 static int g_tel_edit_open = 0;
@@ -787,6 +880,17 @@ static const char *tr(const char *key)
         { "Solo CAN", "CAN only" },
         { "K-line: pendiente", "K-line: pending" },
         { "ACTUAL", "CURRENT" },
+        { "FALLOS", "FAULTS" },
+        { "Codigos de averia", "Fault codes" },
+        { "GUARDADOS", "STORED" },
+        { "PENDIENTES", "PENDING" },
+        { "PERMANENTES", "PERMANENT" },
+        { "SIN CODIGOS", "NO CODES" },
+        { "LAMPARA", "LAMP" },
+        { "X: LEER   CIRCLE: LIMPIAR PANTALLA",
+          "X: READ   CIRCLE: CLEAR SCREEN" },
+        { "SI", "ON" },
+        { "NO", "OFF" },
     };
     if (g_lang == 0 || key == NULL) {
         return key;
@@ -1091,6 +1195,157 @@ static void proto_load(void)
     }
 }
 
+/* Nombre de pantalla a modo. Acepta los nombres que se ven en la barra y
+ * tambien el numero, que es lo que escribe el propio programa. */
+static int mode_from_name(const char *name)
+{
+    if (name == NULL || name[0] == '\0') {
+        return -1;
+    }
+    if (name[0] >= '0' && name[1] == '\0') {
+        int m = name[0] - '0';
+        return (m >= 0 && m < MODE_COUNT) ? m : -1;
+    }
+    for (int m = 0; m < MODE_COUNT; m++) {
+        const char *a = mode_name(m);
+        const char *b = name;
+        int same = 1;
+        while (*a != '\0' || *b != '\0') {
+            char ca = *a, cb = *b;
+            if (ca >= 'a' && ca <= 'z') ca = (char)(ca - 'a' + 'A');
+            if (cb >= 'a' && cb <= 'z') cb = (char)(cb - 'a' + 'A');
+            if (ca != cb) {
+                same = 0;
+                break;
+            }
+            a++;
+            b++;
+        }
+        if (same) {
+            return m;
+        }
+    }
+    if (strcmp(name, "last") == 0 || strcmp(name, "ultima") == 0) {
+        return -1;
+    }
+    return -1;
+}
+
+/* "hidden=SNIFFER,SONDA" -> mascara de modos. */
+static uint8_t mode_hidden_parse(const char *val)
+{
+    uint8_t mask = 0;
+    char buf[96];
+    snprintf(buf, sizeof(buf), "%s", val);
+
+    char *p = buf;
+    while (*p != '\0') {
+        while (*p == ',' || *p == ' ' || *p == ';') {
+            p++;
+        }
+        if (*p == '\0') {
+            break;
+        }
+        char *start = p;
+        while (*p != '\0' && *p != ',' && *p != ' ' && *p != ';') {
+            p++;
+        }
+        char saved = *p;
+        *p = '\0';
+        int m = mode_from_name(start);
+        if (m >= 0 && m < MODE_COUNT) {
+            mask = (uint8_t)(mask | (1u << m));
+        }
+        if (saved == '\0') {
+            break;
+        }
+        p++;
+    }
+    return mask;
+}
+
+/* v.<id>.<clave>=valor */
+static void prefs_parse_key(const char *key, const char *val)
+{
+    char id[24];
+    const char *rest = strchr(key + 2, '.');
+    if (rest == NULL) {
+        return;
+    }
+    size_t idlen = (size_t)(rest - (key + 2));
+    if (idlen == 0 || idlen >= sizeof(id)) {
+        return;
+    }
+    memcpy(id, key + 2, idlen);
+    id[idlen] = '\0';
+
+    vehicle_prefs *vp = car_prefs_for(id, 1);
+    if (vp == NULL) {
+        return;
+    }
+    const char *sk = rest + 1;
+
+    if (strncmp(sk, "slot", 4) == 0 && sk[4] >= '0' && sk[4] <= '5') {
+        int si = sk[4] - '0';
+        if (strcmp(sk + 5, "_item") == 0) {
+            vp->slot_item[si] = atoi(val);
+            vp->has_layout = 1;
+        } else if (strcmp(sk + 5, "_style") == 0) {
+            vp->slot_style[si] = atoi(val);
+            vp->has_layout = 1;
+        }
+    } else if (strncmp(sk, "tel", 3) == 0 && sk[3] >= '0' && sk[3] <= '4') {
+        int ti = sk[3] - '0';
+        if (strcmp(sk + 4, "_item") == 0) {
+            vp->tel_item[ti] = atoi(val);
+            vp->has_layout = 1;
+        }
+    } else if (strcmp(sk, "rpm_max") == 0) {
+        vp->rpm_max = atoi(val);
+        vp->has_tacho = 1;
+    } else if (strcmp(sk, "shift_rpm") == 0) {
+        vp->shift_rpm = atoi(val);
+        vp->has_tacho = 1;
+    }
+}
+
+/* Nombres de las pantallas ocultas, para escribir hidden=. */
+static const char *hidden_names_join(void)
+{
+    static char buf[96];
+    buf[0] = '\0';
+    for (int m = 0; m < MODE_COUNT; m++) {
+        if ((g_hidden_mask & (1u << m)) == 0) {
+            continue;
+        }
+        if (buf[0] != '\0') {
+            strncat(buf, ",", sizeof(buf) - strlen(buf) - 1);
+        }
+        strncat(buf, mode_name(m), sizeof(buf) - strlen(buf) - 1);
+    }
+    return buf;
+}
+
+/* Antes de escribir: lo que el usuario acaba de cambiar va al coche si
+ * hay coche, y si no a la vista global. Asi la vista de un coche no se
+ * cuela en el otro al guardar. */
+static void prefs_capture(void)
+{
+    if (g_vehicle_id[0] != '\0') {
+        vehicle_prefs *p = car_prefs_for(g_vehicle_id, 1);
+        if (p != NULL) {
+            memcpy(p->slot_item, g_slot_item, sizeof(g_slot_item));
+            memcpy(p->slot_style, g_slot_style, sizeof(g_slot_style));
+            memcpy(p->tel_item, g_tel_item, sizeof(g_tel_item));
+            p->has_layout = 1;
+        }
+    } else {
+        memcpy(g_global_slot_item, g_slot_item, sizeof(g_slot_item));
+        memcpy(g_global_slot_style, g_slot_style, sizeof(g_slot_style));
+        memcpy(g_global_tel_item, g_tel_item, sizeof(g_tel_item));
+    }
+}
+
 static void settings_load(void)
 {
     int psp_lang = PSP_SYSTEMPARAM_LANGUAGE_ENGLISH;
@@ -1128,6 +1383,11 @@ static void settings_load(void)
     g_tel_item[2] = W_ECT;
     g_tel_item[3] = W_SPEED;
     g_tel_item[4] = W_OFF;
+
+    g_car_prefs_count = 0;
+    memset(g_car_prefs, 0, sizeof(g_car_prefs));
+    g_start_mode = -1;
+    g_hidden_mask = 0;
 
     SceUID fd = sceIoOpen(SETTINGS_PATH, PSP_O_RDONLY, 0777);
     if (fd < 0) {
@@ -1213,6 +1473,14 @@ static void settings_load(void)
                            strcmp(key, "perfil") == 0 ||
                            strcmp(key, "vehicle") == 0) {
                     snprintf(g_cfg.profile, sizeof(g_cfg.profile), "%.23s", val);
+                } else if (strcmp(key, "start") == 0 ||
+                           strcmp(key, "pantalla_inicial") == 0) {
+                    g_start_mode = mode_from_name(val);
+                } else if (strcmp(key, "hidden") == 0 ||
+                           strcmp(key, "ocultas") == 0) {
+                    g_hidden_mask = mode_hidden_parse(val);
+                } else if (key[0] == 'v' && key[1] == '.') {
+                    prefs_parse_key(key, val);
                 } else if (strcmp(key, "last") == 0 ||
                            strcmp(key, "pantalla") == 0) {
                     int v = atoi(val);
@@ -1314,8 +1582,11 @@ static void settings_load(void)
 
     settings_apply();
 
-    /* Si la vista guardada no es la de fabrica, la ha tocado el usuario:
-     * el perfil del coche no la sustituye. */
+    /* La vista del fichero es la global: es la que se usa cuando el coche
+     * no trae la suya y la que se vuelve a poner al cambiar de coche. */
+    memcpy(g_global_slot_item, g_slot_item, sizeof(g_slot_item));
+    memcpy(g_global_slot_style, g_slot_style, sizeof(g_slot_style));
+    memcpy(g_global_tel_item, g_tel_item, sizeof(g_tel_item));
     g_layout_user = !layout_is_factory();
 
     log_file_printf("Ajustes: tema=%s contraste=%d animacion=%s%s\n",
@@ -1326,6 +1597,8 @@ static void settings_load(void)
 
 static void settings_save(void)
 {
+    prefs_capture();
+
     /* Se escribe al lado y se renombra: si se corta la corriente a mitad,
      * el archivo bueno sigue entero. Con PSP_O_TRUNC sobre el de verdad,
      * un corte dejaba settings.txt en cero y se perdian tema, idioma,
@@ -1389,7 +1662,10 @@ static void settings_save(void)
                      "debug=%d\n"
                      "elm_gap=%d\n"
                      "last=%d\n"
-                     "profile=%s\n",
+                     "profile=%s\n"
+                     "version=2\n"
+                     "start=%s\n"
+                     "hidden=%s\n",
                      g_cfg.theme, g_cfg.color, g_cfg.lang, g_cfg.contrast, g_cfg.anim,
                      g_cfg.fast, g_cfg.peak_hold,
                      g_cfg.smooth, g_cfg.shift_rpm, g_cfg.rpm_max,
@@ -1404,7 +1680,9 @@ static void settings_save(void)
                      g_tel_item[0], g_tel_item[1], g_tel_item[2],
                      g_tel_item[3], g_tel_item[4],
                      g_cfg.show_fps, g_cfg.debug, g_elm_min_gap_ms, g_mode,
-                     g_cfg.profile);
+                     g_cfg.profile,
+                     g_start_mode >= 0 ? mode_name(g_start_mode) : "last",
+                     hidden_names_join());
     if (n > (int)sizeof(buf) - 1) {
         n = (int)sizeof(buf) - 1;
     }
@@ -2690,6 +2968,11 @@ static void vehicle_detect(void)
     } else {
         g_vehicle_centre = p->centre;
     }
+
+    /* Identidad para las preferencias por coche y su vista, si tiene. */
+    snprintf(g_vehicle_id, sizeof(g_vehicle_id), "%s",
+             p->generic ? "" : p->id);
+    layout_apply_for_car();
 
     log_file_printf("Vehiculo: %s (%s, proto %s, mascaras %08X/%08X/%08X)"
                     " tacometro=%d rojo=%d corte=%d\n",
@@ -7203,9 +7486,13 @@ static void draw_picker(void)
 
     for (int i = 0; i < MODE_COUNT; i++) {
         int mode = g_picker_order[i];
-        int avail = screen_available(mode);
+        int avail = screen_offered(mode);
         int sel = (i == g_picker_sel);
 
+        if (!avail && !screen_available(mode)) {
+            /* oculta: no ocupa sitio en la lista */
+            continue;
+        }
         if (i == 4) {
             gfx_text(14, y, tr("HERRAMIENTAS"), QV_DIM, 1);
             y += 14;
@@ -7225,6 +7512,204 @@ static void draw_picker(void)
         }
         y += 24;
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* FALLOS: codigos de averia (modos 03, 07 y 0A). Solo lectura.        */
+/* ------------------------------------------------------------------ */
+
+#define DTC_MAX 12
+
+static obd_dtc g_dtc_stored[DTC_MAX];
+static obd_dtc g_dtc_pending[DTC_MAX];
+static obd_dtc g_dtc_permanent[DTC_MAX];
+static int g_dtc_stored_n = 0;
+static int g_dtc_pending_n = 0;
+static int g_dtc_permanent_n = 0;
+static int g_dtc_mil = -1;        /* -1 = no se ha leido */
+static int g_dtc_count = -1;
+static int g_dtc_state = 0;       /* 0 sin leer, 1 leyendo, 2 leido */
+static char g_dtc_note[32] = "";
+static int g_dtc_request = 0;
+
+static int dtc_hex_digit(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    return -1;
+}
+
+/* Pasa a bytes la respuesta en texto del ELM327 ("43 01 33 00 00 00 00").
+ * Devuelve cuantos bytes hay, servicio incluido; 0 si no habia datos. */
+static int dtc_read_hex(int sock, const char *cmd, uint8_t *out, int max,
+                        elm_reply *reply)
+{
+    elm_send_and_read(sock, cmd, 3000, reply);
+    if (!reply->data) {
+        return 0;
+    }
+
+    int n = 0;
+    const char *p = reply->text;
+    while (*p != '\0' && n < max) {
+        while (*p == ' ') {
+            p++;
+        }
+        if (dtc_hex_digit(p[0]) < 0 || dtc_hex_digit(p[1]) < 0) {
+            break;
+        }
+        out[n++] = (uint8_t)((dtc_hex_digit(p[0]) << 4) | dtc_hex_digit(p[1]));
+        p += 2;
+    }
+    return n;
+}
+
+static void run_fallos(int sock)
+{
+    if (g_dtc_state == 1) {
+        return;
+    }
+
+    g_dtc_state = 1;
+    g_dtc_stored_n = 0;
+    g_dtc_pending_n = 0;
+    g_dtc_permanent_n = 0;
+    g_dtc_mil = -1;
+    g_dtc_count = -1;
+    snprintf(g_dtc_note, sizeof(g_dtc_note), "%s", tr("LEYENDO"));
+
+    if (sock < 0) {
+        g_dtc_state = 2;
+        snprintf(g_dtc_note, sizeof(g_dtc_note), "%s", tr("SIN ADAPTADOR"));
+        return;
+    }
+
+    /* Con las cabeceras apagadas, que es como trabaja el dashboard: la
+     * respuesta empieza por el byte de servicio (41, 43, 47, 4A). */
+    elm_reply reply;
+    uint8_t buf[32];
+
+    log_file_printf("=== CODIGOS DE AVERIA ===\n");
+
+    int n = dtc_read_hex(sock, "0101", buf, (int)sizeof(buf), &reply);
+    if (n >= 3 && buf[0] == 0x41 && buf[1] == 0x01) {
+        obd_dtc_mil(&buf[2], n - 2, &g_dtc_mil, &g_dtc_count);
+        log_file_printf("MIL: %d, codigos: %d\n", g_dtc_mil, g_dtc_count);
+    } else {
+        log_file_printf("MIL: sin respuesta (0101)\n");
+    }
+
+    n = dtc_read_hex(sock, "03", buf, (int)sizeof(buf), &reply);
+    if (n >= 2 && buf[0] == 0x43) {
+        g_dtc_stored_n = obd_dtc_parse(&buf[1], n - 1, g_dtc_stored, DTC_MAX);
+        if (g_dtc_stored_n < 0) {
+            g_dtc_stored_n = 0;
+        }
+    }
+
+    n = dtc_read_hex(sock, "07", buf, (int)sizeof(buf), &reply);
+    if (n >= 2 && buf[0] == 0x47) {
+        g_dtc_pending_n = obd_dtc_parse(&buf[1], n - 1, g_dtc_pending, DTC_MAX);
+        if (g_dtc_pending_n < 0) {
+            g_dtc_pending_n = 0;
+        }
+    }
+
+    n = dtc_read_hex(sock, "0A", buf, (int)sizeof(buf), &reply);
+    if (n >= 2 && buf[0] == 0x4A) {
+        g_dtc_permanent_n = obd_dtc_parse(&buf[1], n - 1, g_dtc_permanent,
+                                          DTC_MAX);
+        if (g_dtc_permanent_n < 0) {
+            g_dtc_permanent_n = 0;
+        }
+    }
+
+    log_file_printf("Codigos: guardados=%d pendientes=%d permanentes=%d\n",
+                    g_dtc_stored_n, g_dtc_pending_n, g_dtc_permanent_n);
+    log_sync();
+
+    g_dtc_state = 2;
+    g_dtc_note[0] = '\0';
+}
+
+/* Una fila de codigo: el codigo y, si la tabla lo conoce, que significa. */
+static void dtc_draw_row(const obd_dtc *d, int x, int y)
+{
+    const char *desc = obd_dtc_describe(d->code);
+    gfx_text(x, y, d->code, QV_TEXT, 1);
+    if (desc != NULL) {
+        gfx_text(x + 56, y, desc, QV_DIM, 1);
+    } else {
+        gfx_text(x + 56, y, tr("sin descripcion"), QV_DIM, 1);
+    }
+}
+
+static void draw_fallos(void)
+{
+    int y = 40;
+
+    gfx_text(8, y, tr("FALLOS"), QV_TEXT, 2);
+    char line[48];
+    const char *mil = (g_dtc_mil < 0) ? "N/D"
+                                      : (g_dtc_mil ? tr("SI") : tr("NO"));
+    const char *cnt = (g_dtc_count < 0) ? "N/D" : "";
+    if (g_dtc_count >= 0) {
+        snprintf(line, sizeof(line), "%s %s   %s %s %d", tr("LAMPARA"), mil,
+                 tr("CODIGOS"), cnt, g_dtc_count);
+    } else {
+        snprintf(line, sizeof(line), "%s %s   %s %s", tr("LAMPARA"), mil,
+                 tr("CODIGOS"), cnt);
+    }
+    gfx_text_right(GFX_W - 8, y + 4, line, QV_DIM, 1);
+    y += 24;
+
+    if (g_dtc_state == 1) {
+        gfx_text(8, y, g_dtc_note, QV_AMBER, 1);
+        return;
+    }
+
+    static const int group_n[3] = { 0, 0, 0 };
+    (void)group_n;
+
+    const char *names[3] = { tr("GUARDADOS"), tr("PENDIENTES"),
+                             tr("PERMANENTES") };
+    const obd_dtc *sets[3] = { g_dtc_stored, g_dtc_pending,
+                               g_dtc_permanent };
+    const int counts[3] = { g_dtc_stored_n, g_dtc_pending_n,
+                            g_dtc_permanent_n };
+
+    if (g_dtc_state == 0) {
+        gfx_text(8, y, tr("X: LEER   CIRCLE: LIMPIAR PANTALLA"), QV_DIM, 1);
+        return;
+    }
+
+    for (int g = 0; g < 3; g++) {
+        if (y > 216) {
+            break;
+        }
+        snprintf(line, sizeof(line), "%s (%d)", names[g], counts[g]);
+        gfx_text(8, y, line, QV_CYAN, 1);
+        y += 14;
+        if (counts[g] == 0) {
+            gfx_text(20, y, tr("SIN CODIGOS"), QV_DIM, 1);
+            y += 14;
+            continue;
+        }
+        for (int i = 0; i < counts[g] && y <= 216; i++) {
+            dtc_draw_row(&sets[g][i], 20, y);
+            y += 14;
+        }
+        y += 4;
+    }
+
+    gfx_text(8, 254, tr("X: LEER   CIRCLE: LIMPIAR PANTALLA"), QV_DIM, 1);
 }
 
 static void draw_modules(void)
@@ -8061,6 +8546,8 @@ static void draw_screen(uint32_t now, int requests, int data_count,
         draw_sniffer();
     } else if (g_mode == MODE_PROBE) {
         draw_probe();
+    } else if (g_mode == MODE_FALLOS) {
+        draw_fallos();
     } else {
         draw_info();
     }
@@ -8164,6 +8651,24 @@ static int handle_mode_input(unsigned int pressed)
         if (pressed & PSP_CTRL_CROSS) {
             g_tel_edit_open = 1;
             g_tel_edit_sel = 0;
+            changed = 1;
+        }
+    }
+
+    if (g_mode == MODE_FALLOS && !g_settings_open) {
+        if ((pressed & PSP_CTRL_CROSS) && g_dtc_state != 1) {
+            g_dtc_request = 1;
+            changed = 1;
+        }
+        /* Limpia la PANTALLA, no la centralita: el modo 04 no se envia
+         * nunca. Es solo volver a "sin leer" para forzar una lectura. */
+        if (pressed & PSP_CTRL_CIRCLE) {
+            g_dtc_state = 0;
+            g_dtc_stored_n = 0;
+            g_dtc_pending_n = 0;
+            g_dtc_permanent_n = 0;
+            g_dtc_mil = -1;
+            g_dtc_count = -1;
             changed = 1;
         }
     }
@@ -8519,7 +9024,7 @@ static int handle_ui_input(unsigned int pressed)
         }
         if (pressed & (PSP_CTRL_CROSS | PSP_CTRL_START)) {
             int m = g_picker_order[g_picker_sel];
-            if (screen_available(m)) {
+            if (screen_offered(m)) {
                 g_mode = m;
                 g_picker_open = 0;
                 apply_screen_schedule(now_ms());
@@ -8775,6 +9280,22 @@ static void run_dashboard(Target *targets, int target_count)
             /* Guardar al salir sella la pantalla donde se dejo. */
             settings_save();
             break;
+        }
+
+        if (g_dtc_request) {
+            g_dtc_request = 0;
+            if (rx.active) {
+                obd_sched_end(&g_sched, rx_idx, now_ms(), 0);
+                if (sock >= 0) {
+                    elm_flush_input(sock);
+                }
+                memset(&rx, 0, sizeof(rx));
+            }
+            g_dtc_state = 0;
+            run_fallos(sock);
+            now = now_ms();
+            last_status = now;
+            continue;
         }
 
         if (g_scan_request) {
@@ -9166,7 +9687,12 @@ int main(void)
     proto_load();
     /* Se arranca donde se quedo, pero solo si era una pantalla de
      * conduccion: abrir siempre en SNIFFER no sirve al conducir. */
-    g_mode = mode_is_driving(g_last_mode) ? g_last_mode : MODE_QV;
+    /* start= manda; si no hay, la ultima pantalla de conduccion. */
+    if (g_start_mode >= 0 && g_start_mode < MODE_COUNT) {
+        g_mode = g_start_mode;
+    } else {
+        g_mode = mode_is_driving(g_last_mode) ? g_last_mode : MODE_QV;
+    }
     /* Ya esta en disco: no hace falta reescribirlo en el primer tick. */
     g_last_saved_mode = g_mode;
     log_file_printf("Pantalla inicial: %s\n", mode_name(g_mode));
