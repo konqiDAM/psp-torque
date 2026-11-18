@@ -106,7 +106,9 @@ void test_pid(void)
     CHECK(obd_pid_expected_bytes(0x00) == 4);
     CHECK(obd_pid_expected_bytes(0x0C) == 2);
     CHECK(obd_pid_expected_bytes(0x0D) == 1);
-    CHECK(obd_pid_expected_bytes(0x13) == 1);
+    /* 0x13 no tiene decodificacion y por tanto no esta en la lista: mejor
+     * fallar en la puerta que pasarla y llegar a un N/D contado como dato. */
+    CHECK(obd_pid_expected_bytes(0x13) == 0);
     CHECK(obd_pid_expected_bytes(0x1B) == 1);
     CHECK(obd_pid_expected_bytes(0x14) == 2);
     CHECK(obd_pid_expected_bytes(0x99) == 0);

@@ -25,7 +25,6 @@ int obd_pid_expected_bytes(uint8_t pid)
     case 0x0E:
     case 0x0F:
     case 0x11:
-    case 0x13:
     case 0x1B:
     case 0x2F:
     case 0x33:
@@ -47,7 +46,7 @@ int obd_pid_expected_bytes(uint8_t pid)
         return 2;
 
     default:
-        if (pid >= 0x13 && pid <= 0x1B) {
+        if (pid >= 0x14 && pid <= 0x1B) {
             return 2;  /* sondas O2 de banda estrecha */
         }
         return 0;

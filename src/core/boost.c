@@ -22,6 +22,12 @@ void boost_init(boost_state *state, float fallback_kpa)
 
 void boost_set_map(boost_state *state, float kpa, uint32_t ts_ms)
 {
+    /* El MAP absoluto no puede estar fuera de la atmosfera: un byte
+     * corrupto en plena aceleracion pintaba 1,5 bar como lectura valida y
+     * ademas se aprendia como pico. */
+    if (kpa < 20.0f || kpa > 350.0f) {
+        return;
+    }
     state->map_valid = 1;
     state->map_kpa = kpa;
     state->map_ts_ms = ts_ms;

@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.56 2026-11-18 rampa de presentacion continua, caducidad por cadencia real"
+#define BUILD_TAG "fase2.57 2026-11-18 revision completa: mariposa, sniffer vivo, tacometro global, map plausible"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -1590,6 +1590,10 @@ static void settings_load(void)
     memset(g_car_prefs, 0, sizeof(g_car_prefs));
     g_start_mode = -1;
     g_hidden_mask = 0;
+    /* Sin restaurar esto, la primera conexion reseteaba el tacometro
+     * global a 7000 y la siguiente guarda pisaba lo que el usuario tenia:
+     * layout_apply_for_car() devuelve g_cfg.rpm_max a este valor. */
+    g_global_rpm_max = 7000;
 
     SceUID fd = sceIoOpen(SETTINGS_PATH, PSP_O_RDONLY, 0777);
     if (fd < 0) {
@@ -1812,6 +1816,11 @@ static void settings_load(void)
     memcpy(g_global_slot_item, g_slot_item, sizeof(g_slot_item));
     memcpy(g_global_slot_style, g_slot_style, sizeof(g_slot_style));
     memcpy(g_global_tel_item, g_tel_item, sizeof(g_tel_item));
+    /* El fondo de escala del fichero tambien: sin esto se quedaba en 7000
+     * de fabrica, la primera conexion de un coche con perfil lo ponia a
+     * 7000 por encima de lo guardado y la siguiente guarda lo escribia en
+     * el disco. */
+    g_global_rpm_max = g_cfg.rpm_max;
     g_layout_user = !layout_is_factory();
 
     log_file_printf("Ajustes: tema=%s contraste=%d animacion=%s%s\n",
@@ -3457,7 +3466,7 @@ static uint8_t widget_pid(int item)
     case W_MAF:      return 0x10;
     case W_THR:      return (uint8_t)g_thr_pid;
     case W_LOAD:     return 0x04;
-    case W_PLATE:    return 0x0D;
+    case W_PLATE:    return 0x11;
     case W_VOLT:     return 0x42;
     case W_OIL:      return 0x5C;
     case W_FUEL:     return 0x2F;
@@ -3849,6 +3858,12 @@ static int connect_network_and_elm(Target *targets, int *target_count,
     }
 
     if (g_connect_cancel) {
+        /* Puede haber un socket abierto si el SELECT llego despues de
+         * conectar con el objetivo pero antes de devolverlo. */
+        if (sock >= 0) {
+            sceNetInetClose(sock);
+            sock = -1;
+        }
         log_file_printf("Conexion cancelada por el usuario.\n");
         net_ui_set("CANCELADO");
         g_net_busy = 0;
@@ -7409,6 +7424,11 @@ static void run_sniff(int sock)
         SceCtrlData pad;
         memset(&pad, 0, sizeof(pad));
         sceCtrlReadBufferPositive(&pad, 1);
+
+        /* Mientras captura no se vuelve al bucle principal: sin esto la
+         * pantalla se quedaba congelada hasta dos minutos y parecia que
+         * la app habia colgado, aunque los botones siguieran funcionando. */
+        net_ui_tick();
         if (pad.Buttons & (PSP_CTRL_CIRCLE | PSP_CTRL_CROSS)) {
             running = 0;
             continue;
@@ -10275,6 +10295,11 @@ static void run_dashboard(Target *targets, int target_count)
                     log_sync();
                 } else if (reconn_tries >= RECONN_MAX_TRIES) {
                     reconn_active = 0;
+                    /* Sin esto el cartel de SIN ADAPTADOR se quedaba para
+                     * siempre y la barra seguia diciendo CONECT estando
+                     * desconectado: el flag de ocupado solo se limpiaba en
+                     * los caminos que si conectan. */
+                    g_net_busy = 0;
                     net_ui_set("SIN ADAPTADOR");
                     log_file_printf("Auto-reintento agotado\n");
                     log_sync();
