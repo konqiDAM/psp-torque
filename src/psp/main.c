@@ -188,6 +188,7 @@ static int g_last_mode = MODE_QV;    /* pantalla recordada entre sesiones */
 static int g_picker_open = 0;        /* selector de pantallas (SELECT) */
 static int g_picker_sel = 0;
 static int g_last_saved_mode = -1;  /* ultima pantalla escrita en last= */
+static uint32_t g_mode_since_ms = 0; /* cuando se cambio de pantalla */
 
 /* FASE K2: capacidad del enlace.
  *
@@ -9886,11 +9887,19 @@ static void run_dashboard(Target *targets, int target_count)
              * la tarjeta tambien cada segundo. Si la app muere sin
              * cerrar, se pierde como mucho el ultimo segundo de log. */
             log_sync();
-            /* Un cambio de pantalla se escribe una sola vez, aqui: asi
-             * "arrancar donde lo deje" tambien vale con L/R. */
+            /* Un cambio de pantalla se escribe una sola vez, y solo si la
+             * pantalla lleva unos segundos quieta: repasar las pantallas con
+             * L/R no debe escribir la tarjeta en cada paso. */
             if (g_last_saved_mode != g_mode) {
-                g_last_saved_mode = g_mode;
-                settings_save();
+                if (g_mode_since_ms == 0) {
+                    g_mode_since_ms = now;
+                } else if ((uint32_t)(now - g_mode_since_ms) >= 5000u) {
+                    g_last_saved_mode = g_mode;
+                    g_mode_since_ms = 0;
+                    settings_save();
+                }
+            } else {
+                g_mode_since_ms = 0;
             }
 
             /* FASE K2: cada ventana de 10 s se compara lo pedido con lo
