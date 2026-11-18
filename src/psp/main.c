@@ -47,6 +47,7 @@
 #include "obd/scheduler.h"
 #include "obd/smooth.h"
 #include "obd/vehicle.h"
+#include "splash_mx5.h"
 
 #include "gfx.h"
 #include "audio.h"
@@ -78,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.46 2026-11-18 FASE K2 reparto por capacidad del enlace y selector de pantallas afinado"
+#define BUILD_TAG "fase2.47 2026-11-18 FASE U3+U6 vista por coche, FALLOS y arranque MX-5 elegible"
 #define CMD_TIMEOUT_MS 500
 /* Si el adaptador ha demostrado que envia el prompt '>', hay que esperarlo
  * antes de mandar el siguiente comando. El ELM327 hace tareas internas
@@ -1426,7 +1427,8 @@ static void settings_load(void)
                     g_cfg.contrast = atoi(val);
                 } else if (strcmp(key, "animacion") == 0 ||
                            strcmp(key, "anim") == 0) {
-                    g_cfg.anim = atoi(val) ? 1 : 0;
+                    int v = atoi(val);
+                    g_cfg.anim = (v < 0) ? 0 : (v > 2 ? 2 : v);
                 } else if (strcmp(key, "rapido") == 0 ||
                            strcmp(key, "fast") == 0 ||
                            strcmp(key, "modo") == 0) {
@@ -1525,7 +1527,10 @@ static void settings_load(void)
     if (g_cfg.contrast < 0 || g_cfg.contrast > 2) {
         g_cfg.contrast = 1;
     }
-    g_cfg.anim = g_cfg.anim ? 1 : 0;
+    /* 0 = sin animacion, 1 = la del MiTo, 2 = la del MX-5. */
+    if (g_cfg.anim < 0 || g_cfg.anim > 2) {
+        g_cfg.anim = 1;
+    }
     g_cfg.fast = g_cfg.fast ? 1 : 0;
     g_cfg.peak_hold = g_cfg.peak_hold ? 1 : 0;
     g_cfg.smooth = g_cfg.smooth ? 1 : 0;
@@ -6597,7 +6602,9 @@ static void draw_settings_overlay(void)
                      g_contrast_names[g_cfg.contrast]);
         } else if (i == 3) {
             label = tr("ANIMACION");
-            snprintf(value, sizeof(value), "%s", g_cfg.anim ? "SI" : "NO");
+            snprintf(value, sizeof(value), "%s",
+                     g_cfg.anim == 0 ? tr("NO")
+                                     : (g_cfg.anim == 1 ? "MITO" : "MX-5"));
         } else if (i == 4) {
             label = tr("MUESTREO");
             snprintf(value, sizeof(value), "%s",
@@ -8833,7 +8840,7 @@ static int handle_settings_input(unsigned int pressed)
                 g_cfg.contrast = 2;
             }
         } else if (g_settings_sel == 3) {
-            g_cfg.anim = !g_cfg.anim;
+            g_cfg.anim = (g_cfg.anim + 1) % 3;
         } else if (g_settings_sel == 4) {
             g_cfg.fast = !g_cfg.fast;
         } else if (g_settings_sel == 5) {
@@ -9103,18 +9110,20 @@ static void draw_splash_frame(unsigned int t)
 
 static void startup_animation(void)
 {
-    /* Con la animacion desactivada se muestra un unico fotograma final. */
-    if (!g_cfg.anim) {
-        draw_splash_frame(1600u);
+    /* Sin animacion se va directo al dashboard: ni fotograma ni espera. */
+    if (g_cfg.anim == 0) {
         return;
     }
 
     unsigned int start = now_ms();
+    /* Cada animacion dice cuanto dura; hoy las dos son 1600 ms, pero el
+     * bucle no lo da por supuesto. */
+    const uint32_t total = (g_cfg.anim == 2) ? splash_mx5_total_ms() : 1600u;
     SceCtrlData pad;
 
     for (;;) {
         unsigned int t = now_ms() - start;
-        if (t >= 1600u) {
+        if (t >= total) {
             break;
         }
 
@@ -9124,7 +9133,11 @@ static void startup_animation(void)
             break;
         }
 
-        draw_splash_frame(t);
+        if (g_cfg.anim == 2) {
+            splash_mx5_draw(t);
+        } else {
+            draw_splash_frame(t);
+        }
     }
 }
 
