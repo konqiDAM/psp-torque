@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.52 2026-11-18 SALIR visible en ajustes, salida con START mantenido, indicador escalado al enlace"
+#define BUILD_TAG "fase2.53 2026-11-18 plan sin bucle cuesta abajo, muestra valida tres ciclos, SALIR visible"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -2002,13 +2002,38 @@ static void fmt_1(char *buf, size_t size, float value)
              scaled / 10, scaled % 10);
 }
 
+/* Cuanto sigue valiendo una muestra.
+ *
+ * El tope fijo de 6 s vale en CAN, donde un PID vuelve cada 330 ms. En el
+ * K-line de la MX-5 el plan le da a cada valor visible un periodo de 6 a
+ * 9 s, asi que el tope se cumplia entre muestra y muestra y el cuadro
+ * parpadeaba a N/D un tercio del tiempo (medido en phase1_007: ect N/D en
+ * 45 de 127 muestras, iat 57, velocidad 53). Una lectura vale hasta tres
+ * de sus propios ciclos, con suelo de 6 s y techo de 20. */
+static uint32_t sample_valid_ms(uint8_t pid)
+{
+    for (int i = 0; i < g_sched.count; i++) {
+        if (g_sched.items[i].pid == pid) {
+            uint32_t v = (uint32_t)g_sched.items[i].period_ms * 3u;
+            if (v < 6000u) {
+                v = 6000u;
+            }
+            if (v > 20000u) {
+                v = 20000u;
+            }
+            return v;
+        }
+    }
+    return 6000u;
+}
+
 static int sample_value(uint8_t pid, uint32_t now, float *out)
 {
     const obd_sample *sample = obd_store_get(&g_store, pid);
     if (sample == NULL || !sample->valid) {
         return 0;
     }
-    if ((uint32_t)(now - sample->ts_ms) > 6000u) {
+    if ((uint32_t)(now - sample->ts_ms) > sample_valid_ms(pid)) {
         return 0;
     }
     *out = sample->value;
@@ -10168,8 +10193,17 @@ static void run_dashboard(Target *targets, int target_count)
                     float ceiling = obd_profile_link_class(OBD_PROTO_KLINE);
                     float base = (g_link_measured > 0.0f) ? g_link_measured
                                                           : ceiling;
-                    float next = obd_capacity_next(base, rate,
-                                                   g_plan_demand, ceiling);
+                    /* Contra lo que el plan decidio gastar, no contra lo
+                     * que la tabla pediria: con el plan comprimido la
+                     * demanda siempre supera al presupuesto, asi que
+                     * comparar con ella recortaba la capacidad en cada
+                     * ventana y la dejaba en bucle cuesta abajo (2,20 ->
+                     * 0,80 req/s en una sesion con el enlace entregando
+                     * 2,30). */
+                    float asked = (g_plan_demand < g_link_plan.budget)
+                                      ? g_plan_demand
+                                      : g_link_plan.budget;
+                    float next = obd_capacity_next(base, rate, asked, ceiling);
                     if (next != g_link_measured) {
                         g_link_measured = next;
                         log_file_printf(

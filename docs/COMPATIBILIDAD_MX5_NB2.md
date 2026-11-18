@@ -176,6 +176,37 @@ Three things came out of it:
 Not yet exercised on this car: the `FALLOS` screen itself (mode 03/07/0A), the gear
 indicator (needs the profile, so it read `N/D` all session), and any driving data.
 
+## 3d. Second session, `phase1_007` (fase2.52)
+
+255 s parked, idling, a short blip to 3200 rpm at the end, then a clean exit.
+
+```
+build: fase2.52
+Vehiculo: Mazda MX-5 NB2 tacometro=8000 rojo=7000 corte=7200
+Fin de sesion: peticiones=425 datos=425 nd=0 to=0
+Enlace: 1.77 req/s medidas, plan 1.50 req/s (comprimido)
+Sesion: 255 s, reconexiones=0, caidas=0
+```
+
+Three things settled and two found:
+
+- **The profile works.** It is the car, not a generic K-line, so the tacho ends at
+  8000, the red zone is at 7000 and the gear ratios are live.
+- **The link is clean.** 425 requests, 425 answers, zero `NO DATA`, zero timeouts,
+  zero reconnects: the 1000 ms K-line timeout removed the late-prompt desyncs that
+  used to cost a request each.
+- **The clean exit writes the summary**, which is how we now know how a session went
+  without reading 36 KB of protocol traffic.
+- **The plan collapses by itself** (`2.40` delivered at the start, `0.80` four minutes
+  later, on a link that carries 2.30). The capacity estimator compared the delivered
+  rate against what the *table* wanted rather than against what the *plan* chose to
+  spend, and with the plan compressed the table always asks for more, so it cut every
+  window and never came back. `fase2.53` compares against the budget.
+- **Every value but rpm blinked to `N/D`** for a third of the time (coolant 45 of 127
+  samples, intake 57, speed 53). A sample was trusted for a flat 6 s while the plan
+  refreshes each one every 6–9 s. A sample now lasts three of its own cycles, floor
+  6 s, cap 20 s.
+
 ## 4. Design consequences
 
 1. **`BOOST` cannot exist on this car.** `BOOST = MAP − barometric` and neither `0B`
