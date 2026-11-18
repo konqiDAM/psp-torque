@@ -60,6 +60,29 @@ export PATH=/root/pspdev/bin:$PATH
 make PSPDEV=/root/pspdev && make -C tests clean all
 ```
 
+### Without root (Debian/Ubuntu where you cannot apt-get install)
+
+On a machine where you have no root, everything above still works if the packages are
+unpacked into `~/.local` with `dpkg-deb -x` instead of installed. That is how
+`capy-homelab` builds this repository:
+
+```sh
+cd /tmp
+apt-get download make gcc-14 gcc-14-x86-64-linux-gnu cpp-14-x86-64-linux-gnu \
+    binutils binutils-x86-64-linux-gnu libbinutils binutils-common libc6-dev \
+    libgcc-14-dev libgcc-s1 linux-libc-dev libisl23 libzstd1 libmpc3 libgmp10 \
+    libmpfr6 libsframe1 libctf0 libctf-nobfd0 zlib1g
+for d in *.deb; do dpkg-deb -x "$d" ~/.local; done
+```
+
+Two details make the unpacked compiler work: the linker resolves the absolute paths
+inside `libc.so` through `--sysroot=$HOME/.local`, and the runtime libraries it needs
+(`libc.so.6`, `libm.so.6`, `libmvec.so.1`) are symlinked into the sysroot from the host.
+`~/bin/hostcc` wraps that, so `make -C tests all CC=$HOME/bin/hostcc` just works.
+
+The pspdev tarball needs `libmpc`, `libgmp` and `libmpfr` at run time; the same
+`LD_LIBRARY_PATH=$HOME/.local/usr/lib/x86_64-linux-gnu` covers them.
+
 The build needs nothing from the Windows machine: no `/mnt/c`, no PSP, no PPSSPP. Only
 the toolchain tarball and the clone. `make -C tests` prints `OK: todas las pruebas pasan`.
 
