@@ -127,7 +127,10 @@ change the code.
 | `L` + `R` (1.5 s) | Toggle **demo mode** |
 | `CIRCLE` | Cancel a running scan · clear the learned boost peak |
 
-To quit: `START` → `X` on `SALIR`.
+To quit: hold `START` for 1.2 s, or `START` → scroll down to `SALIR` → `X`. Both
+are clean exits: they save the settings and write the session summary at the end
+of the log. The PSP HOME button skips all of that, and the log then ends without
+a summary.
 
 From a tool screen, `L`/`R` goes back to GENERAL.
 

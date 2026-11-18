@@ -128,7 +128,10 @@ si quieres tocar el código.
 | `L` + `R` (1,5 s) | Activar / desactivar el **modo demo** |
 | `CIRCLE` | Cancelar un escaneo en curso · borrar el máximo de turbo aprendido |
 
-Para salir de la aplicación: `START` → `X` sobre `SALIR`.
+Para salir de la aplicación: mantener `START` pulsado 1,2 s, o `START` → bajar
+hasta `SALIR` → `X`. Las dos salidas son limpias: guardan los ajustes y escriben
+el resumen de la sesión al final del log. Con el botón HOME de la PSP no se
+ejecuta nada de eso y el log termina sin resumen.
 
 Desde una pantalla de herramientas, `L`/`R` vuelve a GENERAL.
 

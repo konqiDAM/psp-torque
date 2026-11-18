@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.50 2026-11-18 perfil tras fijar protocolo, ECU en silencio, indicador escalado al enlace"
+#define BUILD_TAG "fase2.51 2026-11-18 salida limpia con START mantenido, indicador escalado al enlace"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -1012,6 +1012,8 @@ static const char *tr(const char *key)
         { "FALLOS", "FAULTS" },
         { "CONGELADO", "FREEZE FRAME" },
         { "SIN MODO 02", "NO MODE 02" },
+        { "X: GUARDAR   START: CERRAR   MANTENER START: SALIR",
+          "X: SAVE   START: CLOSE   HOLD START: EXIT" },
         { "LOG COMPLETO", "FULL LOG" },
         { "Codigos de averia", "Fault codes" },
         { "GUARDADOS", "STORED" },
@@ -7014,7 +7016,7 @@ static void draw_settings_overlay(void)
     gfx_text((int)x + 16, (int)(y + h) - 28,
              "ARRIBA/ABAJO: ELEGIR   IZQ/DER: CAMBIAR", QV_DIM, 1);
     gfx_text((int)x + 16, (int)(y + h) - 16,
-             "X: GUARDAR   CIRCLE: BORRAR TURBO   START: SALIR",
+             tr("X: GUARDAR   START: CERRAR   MANTENER START: SALIR"),
              QV_DIM, 1);
 }
 
@@ -9671,6 +9673,8 @@ static void run_dashboard(Target *targets, int target_count)
     /* L+R mantenidos 1,5 s: activa/desactiva el modo demo. */
     uint32_t chord_since = 0;
     int chord_done = 0;
+    uint32_t start_since = 0;   /* START mantenido: salir de la app */
+    int start_exit_done = 0;
 
     /* FASE D1: peticion OBD en vuelo (una sola). */
     elm_rx rx;
@@ -9723,6 +9727,24 @@ static void run_dashboard(Target *targets, int target_count)
             chord_done = 0;
         }
 
+        /* START mantenido 1,2 s sale de la app. La salida limpia guarda los
+         * ajustes y escribe el resumen de sesion al final del log; con HOME
+         * no se ejecuta nada de eso y el log se queda sin cierre, que es
+         * exactamente lo que paso el 18/11/2026. Una pulsacion corta sigue
+         * abriendo y cerrando el menu. */
+        if (pad.Buttons & PSP_CTRL_START) {
+            if (start_since == 0) {
+                start_since = now ? now : 1;
+            } else if (!start_exit_done &&
+                       (uint32_t)(now - start_since) >= 1200u) {
+                start_exit_done = 1;
+                g_exit_request = 1;
+            }
+        } else {
+            start_since = 0;
+            start_exit_done = 0;
+        }
+
         /* Reintento de conexion; deshabilitado con los ajustes abiertos.
          * El selector de pantallas se cierra antes: si no, taparia el
          * aviso de CONECTANDO y SELECT pasaria a cancelar la conexion. */
@@ -9770,7 +9792,7 @@ static void run_dashboard(Target *targets, int target_count)
 
         if (g_exit_request) {
             g_exit_request = 0;
-            log_file_printf("Salida solicitada desde el menu\n");
+            log_file_printf("Salida solicitada: cierre limpio\n");
             /* Guardar al salir sella la pantalla donde se dejo. */
             settings_save();
             break;
