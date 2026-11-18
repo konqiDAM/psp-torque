@@ -48,6 +48,17 @@ int obd_sched_next(obd_scheduler *sched, uint32_t now_ms)
         }
 
         obd_poll_item *cur = &sched->items[best];
+        /* Con el enlace comprimido manda la prioridad. Sin esto, un PID de
+         * periodo corto casi nunca se atrasa y los de periodo largo, que
+         * siempre estan vencidos, le pasan por delante siempre: por eso el
+         * RPM se refrescaba cada 4,4 s en el coche lento. Dentro de la
+         * misma prioridad se sigue sirviendo el mas antiguo. */
+        if (sched->strict && item->priority != cur->priority) {
+            if (item->priority < cur->priority) {
+                best = i;
+            }
+            continue;
+        }
         /* EDF: el mas antiguo primero, para no dejar morir a los de
          * baja prioridad cuando el RTT supera sus periodos. */
         if ((int32_t)(item->next_due_ms - cur->next_due_ms) < 0) {
@@ -119,6 +130,19 @@ void obd_sched_set_supported(obd_scheduler *sched, int idx, int supported)
     }
     sched->items[idx].supported = supported ? 1 : 2;
     sched->items[idx].no_data_count = 0;
+}
+
+void obd_sched_set_priority(obd_scheduler *sched, int idx, uint8_t priority)
+{
+    if (idx < 0 || idx >= sched->count) {
+        return;
+    }
+    sched->items[idx].priority = priority;
+}
+
+void obd_sched_set_strict(obd_scheduler *sched, int strict)
+{
+    sched->strict = strict ? 1 : 0;
 }
 
 int obd_sched_apply_mask(obd_scheduler *sched, uint32_t mask,

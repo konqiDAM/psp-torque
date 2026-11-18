@@ -15,6 +15,7 @@ void test_smooth(void);
 void test_set_period(void);
 void test_forced_set(void);
 void test_vehicle(void);
+void test_scheduler_strict(void);
 void test_plan(void);
 
 int g_failures = 0;
@@ -130,6 +131,7 @@ int main(void)
     test_pid();
     test_boost();
     test_scheduler();
+    test_scheduler_strict();
     test_samples();
     test_discovery();
     test_profile();

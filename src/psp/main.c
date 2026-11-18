@@ -77,7 +77,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.45 2026-11-18 FASE U4 perfil de coche: MX-5 NB2 con tacometro 8000, rojo 7000 y corte 7200"
+#define BUILD_TAG "fase2.46 2026-11-18 FASE K2 reparto por capacidad del enlace y selector de pantallas afinado"
 #define CMD_TIMEOUT_MS 500
 /* Si el adaptador ha demostrado que envia el prompt '>', hay que esperarlo
  * antes de mandar el siguiente comando. El ELM327 hace tareas internas
@@ -172,6 +172,34 @@ static int g_last_mode = MODE_QV;    /* pantalla recordada entre sesiones */
 static int g_picker_open = 0;        /* selector de pantallas (SELECT) */
 static int g_picker_sel = 0;
 static int g_last_saved_mode = -1;  /* ultima pantalla escrita en last= */
+
+/* FASE K2: capacidad del enlace.
+ *
+ * En CAN no se mide: la tabla base ya cabe en el presupuesto y ese coche es
+ * el de regresion, asi que su comportamiento no puede depender de una
+ * medida. En K-line se parte del techo de la clase y se baja a lo medido,
+ * que es lo unico que puede hacer util un enlace de 1,9 req/s. */
+static float g_link_measured = 0.0f;    /* 0 = sin medida todavia */
+static uint16_t g_link_service_ms = 530;
+static obd_link_plan g_link_plan;
+static float g_plan_demand = 0.0f;      /* req/s que pide el plan actual */
+static uint32_t g_cap_window_ms = 0;
+static int g_cap_window_reqs = 0;
+static uint8_t g_prio_orig[OBD_SCHED_MAX];
+
+/* Capacidad con la que se planifica ahora mismo. */
+static float link_capacity(void)
+{
+    int cls = obd_vehicle_proto_class(g_proto);
+    float cap = obd_profile_link_class(cls);
+    if (cls == OBD_PROTO_CAN) {
+        return cap;
+    }
+    if (g_link_measured > 0.0f && g_link_measured < cap) {
+        return g_link_measured;
+    }
+    return cap;
+}
 
 static int scan_can(void);
 static const char *tr(const char *key);
@@ -2603,6 +2631,7 @@ static uint8_t widget_pid(int item)
 static void apply_screen_schedule(uint32_t now)
 {
     uint8_t mode_mask;
+    float demand = 0.0f;
 
     switch (g_mode) {
     case MODE_ENGINE:
@@ -2640,12 +2669,38 @@ static void apply_screen_schedule(uint32_t now)
         }
     }
 
+    /* FASE K2: si la tabla base no cabe en el presupuesto del enlace se
+     * reparte por capacidad; si cabe, obd_plan_period devuelve la tabla tal
+     * cual y el coche rapido no cambia de comportamiento. */
+    obd_plan_init(&g_link_plan, link_capacity(), g_link_service_ms,
+                  obd_profile_demand(mode_mask));
+    obd_sched_set_strict(&g_sched, g_link_plan.compressed);
+
+    /* Cuantos valores se reparten el presupuesto: el RPM va aparte y los
+     * que no estan soportados no cuentan. */
+    int value_count = 0;
     for (int i = 0; i < g_sched.count; i++) {
         uint8_t pid = g_sched.items[i].pid;
         uint8_t mask = obd_profile_visible_mask(pid);
         int visible = (mask & mode_mask) != 0 ||
                       obd_forced_set_has(&forced, pid);
-        uint16_t period = obd_profile_period(pid, visible);
+        if (visible && pid != 0x0C && g_sched.items[i].supported != 2) {
+            value_count++;
+        }
+    }
+
+    int rank = 0;
+    for (int i = 0; i < g_sched.count; i++) {
+        uint8_t pid = g_sched.items[i].pid;
+        uint8_t mask = obd_profile_visible_mask(pid);
+        int visible = (mask & mode_mask) != 0 ||
+                      obd_forced_set_has(&forced, pid);
+        int my_rank = 0;
+        if (visible && pid != 0x0C) {
+            my_rank = ++rank;
+        }
+        uint16_t period = obd_plan_period(&g_link_plan, pid, visible,
+                                          my_rank, value_count);
         if (period == 0) {
             /* PID sin entrada en la tabla: periodo lento, nunca 10 Hz. */
             period = 10000;
@@ -2653,7 +2708,24 @@ static void apply_screen_schedule(uint32_t now)
         int was_due = (int32_t)(now - g_sched.items[i].next_due_ms) >= 0;
         obd_sched_set_period(&g_sched, i, period,
                              visible && !was_due ? 1 : 0);
+
+        /* Con el enlace comprimido la prioridad pasa a ser el nivel del
+         * plan (RPM, valores en pantalla, fondo). Sin comprimir se devuelve
+         * la de la tabla, que es la que guarda build_scheduler. */
+        if (g_link_plan.compressed) {
+            uint8_t tier = (pid == 0x0C) ? 0 : (visible ? 1 : 2);
+            if (g_sched.items[i].priority != tier) {
+                obd_sched_set_priority(&g_sched, i, tier);
+            }
+        } else if (g_sched.items[i].priority != g_prio_orig[i]) {
+            obd_sched_set_priority(&g_sched, i, g_prio_orig[i]);
+        }
+
+        if (g_sched.items[i].supported != 2 && period > 0) {
+            demand += 1000.0f / (float)period;
+        }
     }
+    g_plan_demand = demand;
 }
 
 static void build_scheduler(void)
@@ -2753,6 +2825,12 @@ static void build_scheduler(void)
     log_file_printf("Soporte: aceite=%s combustible=%s mariposa=0x11\n",
                     g_oil_supported ? "SI" : "NO",
                     g_fuel_supported ? "SI" : "NO");
+
+    /* FASE K2: guardar las prioridades de la tabla, que son a las que se
+     * vuelve en cuanto el enlace deja de estar comprimido. */
+    for (int i = 0; i < g_sched.count && i < OBD_SCHED_MAX; i++) {
+        g_prio_orig[i] = g_sched.items[i].priority;
+    }
 
     /* FASE F3: los periodos dependen de la pantalla activa. */
     apply_screen_schedule(now_ms());
@@ -8880,6 +8958,41 @@ static void run_dashboard(Target *targets, int target_count)
                 g_last_saved_mode = g_mode;
                 settings_save();
             }
+
+            /* FASE K2: cada ventana de 10 s se compara lo pedido con lo
+             * entregado. Solo en K-line: en CAN la tabla ya cabe en el
+             * presupuesto y ese coche no puede depender de una medida. */
+            if (obd_vehicle_proto_class(g_proto) != OBD_PROTO_CAN) {
+                if (last_rtt > 0) {
+                    g_link_service_ms = (uint16_t)last_rtt;
+                }
+                if (g_cap_window_ms == 0) {
+                    g_cap_window_ms = now;
+                    g_cap_window_reqs = requests;
+                } else if ((uint32_t)(now - g_cap_window_ms) >= 10000u) {
+                    uint32_t elapsed = (uint32_t)(now - g_cap_window_ms);
+                    float rate = (float)(requests - g_cap_window_reqs) *
+                                 1000.0f / (float)elapsed;
+                    float ceiling = obd_profile_link_class(OBD_PROTO_KLINE);
+                    float base = (g_link_measured > 0.0f) ? g_link_measured
+                                                          : ceiling;
+                    float next = obd_capacity_next(base, rate,
+                                                   g_plan_demand, ceiling);
+                    if (next != g_link_measured) {
+                        g_link_measured = next;
+                        log_file_printf(
+                            "Enlace: %.2f req/s entregadas, pedidas %.2f; "
+                            "plan %.2f req/s (%s)\n",
+                            rate, g_plan_demand, g_link_measured,
+                            g_link_plan.compressed ? "comprimido" : "holgado");
+                        log_sync();
+                        apply_screen_schedule(now);
+                    }
+                    g_cap_window_ms = now;
+                    g_cap_window_reqs = requests;
+                }
+            }
+
             gap_acc = 0;
             gap_n = 0;
         }

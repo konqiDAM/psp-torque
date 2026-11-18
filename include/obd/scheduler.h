@@ -18,6 +18,10 @@ typedef struct {
     obd_poll_item items[OBD_SCHED_MAX];
     int count;
     int in_flight;         /* indice o -1 */
+    /* FASE K2: con el enlace comprimido se sirve por prioridad y, dentro
+     * de la misma, por vencimiento. Sin comprimir se queda en EDF puro,
+     * que es lo que usan los coches rapidos y lo que habia antes. */
+    int strict;
 } obd_scheduler;
 
 void obd_sched_init(obd_scheduler *sched);
@@ -43,6 +47,13 @@ void obd_sched_end(obd_scheduler *sched, int idx, uint32_t now_ms,
                    int got_data);
 
 void obd_sched_set_supported(obd_scheduler *sched, int idx, int supported);
+
+/* Cambia la prioridad de un PID en caliente (0 = mas alta). No toca ni el
+ * periodo ni el vencimiento. */
+void obd_sched_set_priority(obd_scheduler *sched, int idx, uint8_t priority);
+
+/* 1 = servir por prioridad antes que por vencimiento. */
+void obd_sched_set_strict(obd_scheduler *sched, int strict);
 
 /* Marca todos los PID no soportados segun la mascara del bloque.
  * first_pid = 0x01, 0x21, 0x41... Devuelve cuantos ha cambiado. */

@@ -168,3 +168,57 @@ void test_set_period(void)
     obd_sched_set_period(&s, -1, 500, 1);
     CHECK(s.items[0].period_ms == 100);
 }
+
+/* FASE K2: con el enlace comprimido manda la prioridad. Es lo que hace
+ * que el RPM no se quede detras de los PIDs de periodo largo, que siempre
+ * estan vencidos. Sin comprimir, EDF como siempre. */
+void test_scheduler_strict(void)
+{
+    obd_scheduler sched;
+
+    obd_sched_init(&sched);
+    /* RPM con periodo largo y prioridad 0; un PID lento con periodo corto
+     * y prioridad baja. Asi los dos acaban vencidos y el mas antiguo es el
+     * de prioridad baja: es exactamente el caso que rompia el RPM. */
+    int rpm = obd_sched_add(&sched, 0x0C, 400, 0);
+    int slow = obd_sched_add(&sched, 0x14, 100, 2);
+    CHECK(rpm == 0);
+    CHECK(slow == 1);
+
+    obd_sched_begin(&sched, rpm, 0);
+    obd_sched_end(&sched, rpm, 0, 1);
+    CHECK(sched.items[rpm].next_due_ms == 400);
+    obd_sched_begin(&sched, slow, 0);
+    obd_sched_end(&sched, slow, 0, 1);
+    CHECK(sched.items[slow].next_due_ms == 100);
+
+    /* A los 450 los dos estan vencidos y el lento tiene el plazo mas
+     * antiguo: EDF lo sirve a el. */
+    CHECK(obd_sched_next(&sched, 450) == slow);
+
+    /* Con el enlace comprimido manda la prioridad: primero el RPM. */
+    obd_sched_set_strict(&sched, 1);
+    CHECK(sched.strict == 1);
+    CHECK(obd_sched_next(&sched, 450) == rpm);
+
+    /* Y en cuanto se sirve, el lento no se queda sin turno. */
+    obd_sched_begin(&sched, rpm, 450);
+    obd_sched_end(&sched, rpm, 450, 1);
+    CHECK(obd_sched_next(&sched, 450) == slow);
+
+    /* Aflojar el enlace devuelve el comportamiento de siempre. */
+    obd_sched_set_strict(&sched, 0);
+    CHECK(sched.strict == 0);
+
+    /* Cambiar una prioridad no toca periodo ni vencimiento. */
+    uint16_t period = sched.items[slow].period_ms;
+    uint32_t due = sched.items[slow].next_due_ms;
+    obd_sched_set_priority(&sched, slow, 1);
+    CHECK(sched.items[slow].priority == 1);
+    CHECK(sched.items[slow].period_ms == period);
+    CHECK(sched.items[slow].next_due_ms == due);
+
+    /* Y un indice fuera de rango se ignora. */
+    obd_sched_set_priority(&sched, 99, 3);
+    obd_sched_set_strict(&sched, 1);
+}
