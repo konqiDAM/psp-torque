@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.47 2026-11-18 FASE U3+U6 vista por coche, FALLOS y arranque MX-5 elegible"
+#define BUILD_TAG "fase2.48 2026-11-18 FASE U3+U5+U6+fallos vista por coche, codigos de averia, marcha y arranque MX-5"
 #define CMD_TIMEOUT_MS 500
 /* Si el adaptador ha demostrado que envia el prompt '>', hay que esperarlo
  * antes de mandar el siguiente comando. El ELM327 hace tareas internas
