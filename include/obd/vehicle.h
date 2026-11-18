@@ -43,6 +43,10 @@ typedef struct {
     int fuel_cut;        /* corte de inyeccion; 0 = sin dato */
     int centre;          /* OBD_CENTRE_* */
     int generic;         /* 1 = vale para cualquier coche de su clase */
+    /* Marchas: km/h por cada 1000 rpm en cada una, de 1a a la ultima, y 0
+     * al final. Sirve para deducir la marcha con RPM y velocidad; si el
+     * coche no las da, el indicador dice N/D en vez de inventar. */
+    float gear_kmh[6];
 } obd_vehicle_profile;
 
 /* Clase de protocolo a partir de la respuesta de ATDPN ("A3", "3", "A6",
@@ -63,5 +67,9 @@ const obd_vehicle_profile *obd_vehicle_match(int proto, uint32_t mask1,
                                              uint32_t mask2, uint32_t mask3,
                                              const char *forced_id,
                                              int *exact);
+
+/* Marcha deducida de rpm y velocidad: 1..n, o 0 si no se sabe (parado, sin
+ * datos, o fuera de cualquier relacion). gear_kmh es la tabla del perfil. */
+int obd_vehicle_gear(const float *gear_kmh, float rpm, float speed_kmh);
 
 #endif

@@ -617,6 +617,7 @@ enum {
     W_RPM = 0, W_SPEED, W_BOOST, W_ECT, W_IAT, W_MAP, W_MAF,
     W_THR, W_LOAD, W_PLATE, W_VOLT, W_OIL, W_FUEL,
     W_STFT, W_LTFT, W_TIMING, W_O2_1, W_O2_2, W_DIST_MIL, W_BARO,
+    W_GEAR,
     W_COUNT
 };
 #define W_OFF (-1)
@@ -629,7 +630,7 @@ enum { STYLE_GAUGE = 0, STYLE_BAR, STYLE_TEXT, STYLE_OFF, STYLE_COUNT };
 static const char *const g_widget_names[W_COUNT] = {
     "RPM", "VELOCIDAD", "BOOST", "ECT", "IAT", "MAP", "MAF",
     "ACELERADOR", "CARGA", "MARIPOSA", "VOLT", "ACEITE", "COMBUSTIBLE",
-    "STFT", "LTFT", "AVANCE", "O2-1", "O2-2", "MIL", "BARO"
+    "STFT", "LTFT", "AVANCE", "O2-1", "O2-2", "MIL", "BARO", "MARCHA"
 };
 
 static const char *const g_style_names[STYLE_COUNT] = {
@@ -3021,6 +3022,7 @@ static uint8_t widget_pid(int item)
     case W_O2_2:     return 0x15;
     case W_DIST_MIL: return 0x21;
     case W_BARO:     return 0x33;
+    case W_GEAR:     return 0;   /* derivado de RPM y velocidad */
     default:         return 0;
     }
 }
@@ -5625,6 +5627,24 @@ static void widget_view_fill(const dash_data *d, int item, widget_view *wv)
         }
         break;
 
+    case W_GEAR: {
+        /* La marcha sale de rpm y velocidad, con las relaciones del perfil
+         * del coche. Sin perfil, o parado, N/D: no se adivina. */
+        wv->label = "MARCHA";
+        wv->unit = "";
+        wv->fill = QV_CYAN;
+        const obd_vehicle_profile *vp = obd_vehicle_by_id(g_vehicle_id);
+        int gear = 0;
+        if (vp != NULL && d->rpm_valid && d->speed_valid) {
+            gear = obd_vehicle_gear(vp->gear_kmh, d->rpm_val, d->speed_val);
+        }
+        if (gear > 0) {
+            snprintf(wv->value, sizeof(wv->value), "%d", gear);
+            wv->valid = 1;
+        }
+        break;
+    }
+
     case W_SPEED:
         wv->label = "VELOCIDAD";
         wv->unit = units_speed_name();
@@ -6277,6 +6297,7 @@ static int widget_available(int item)
 
     switch (item) {
     case W_RPM:   return 1;
+    case W_GEAR:  return 1;
     case W_BOOST: return g_map_supported;
     case W_MAP:   return g_map_supported;
     case W_MAF:   return g_maf_supported;

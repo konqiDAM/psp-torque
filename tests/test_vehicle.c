@@ -7,6 +7,43 @@
  * central. Estos tests fijan dos cosas que importan en el coche: que la
  * MX-5 de ivan se reconozca por su evidencia, y que nunca se confunda con
  * el MiTo, porque en esa confusion va el decodificado con signo. */
+
+/* FASE U4b: marcha deducida de rpm y velocidad con las relaciones del
+ * perfil. En la MX-5 a 3000 rpm en quinta son 101 km/h; si no cuadra con
+ * ninguna marcha, 0 (N/D) en vez de una marcha inventada. */
+static void test_gear(void)
+{
+    const float mx5[6] = { 8.73f, 14.50f, 20.58f, 27.37f, 33.62f, 0.0f };
+
+    CHECK(obd_vehicle_gear(mx5, 3000.0f, 100.8f) == 5);
+    CHECK(obd_vehicle_gear(mx5, 3000.0f, 26.2f) == 1);
+    CHECK(obd_vehicle_gear(mx5, 3000.0f, 43.5f) == 2);
+    CHECK(obd_vehicle_gear(mx5, 3000.0f, 61.7f) == 3);
+    CHECK(obd_vehicle_gear(mx5, 3000.0f, 82.1f) == 4);
+
+    /* Parado, sin RPM o sin tabla: no se sabe. */
+    CHECK(obd_vehicle_gear(mx5, 800.0f, 0.0f) == 0);
+    CHECK(obd_vehicle_gear(mx5, 0.0f, 50.0f) == 0);
+    CHECK(obd_vehicle_gear(NULL, 3000.0f, 50.0f) == 0);
+
+    /* Una velocidad que no corresponde a ninguna marcha con esas rpm
+     * (embrague pisado, rueda patinando) no devuelve una marcha falsa. */
+    CHECK(obd_vehicle_gear(mx5, 6000.0f, 20.0f) == 0);
+
+    /* El perfil del MiTo no trae relaciones: el indicador dice N/D. */
+    const obd_vehicle_profile *p =
+        obd_vehicle_match(OBD_PROTO_CAN, 0xBE3EB811u, 0x80022001u,
+                          0xC0C00000u, NULL, NULL);
+    CHECK(p != NULL);
+    CHECK(obd_vehicle_gear(p->gear_kmh, 3000.0f, 100.0f) == 0);
+
+    /* Y la MX-5 las trae. */
+    p = obd_vehicle_match(OBD_PROTO_ISO9141, 0xBE1FB811u, 0x80000000u, 0u,
+                          NULL, NULL);
+    CHECK(p != NULL);
+    CHECK(obd_vehicle_gear(p->gear_kmh, 3000.0f, 100.8f) == 5);
+}
+
 void test_vehicle(void)
 {
     int exact = 0;
@@ -110,4 +147,6 @@ void test_vehicle(void)
     CHECK(obd_vehicle_by_id("NO_EXISTE") == NULL);
     CHECK(obd_vehicle_by_id("") == NULL);
     CHECK(obd_vehicle_by_id(NULL) == NULL);
+
+    test_gear();
 }

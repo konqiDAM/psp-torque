@@ -11,18 +11,26 @@
  * 7000 y el corte esta en 7200. No anuncia MAP (0x0B), asi que el gauge
  * central es MAF. */
 static const obd_vehicle_profile g_profiles[] = {
+    /* MiTo: sin relaciones de cambio verificadas, asi que el indicador de
+     * marcha dice N/D en vez de adivinar. */
     { "ALFA_MITO_QV_2010", "Alfa Romeo MiTo QV", OBD_PROTO_CAN,
       0xBE3EB811u, 0x80022001u, 0xC0C00000u,
-      7000, 6500, 0, OBD_CENTRE_BOOST, 0 },
+      7000, 6500, 0, OBD_CENTRE_BOOST, 0, { 0 } },
+    /* MX-5 NB 1.8 5 marchas: 3.136, 1.888, 1.330, 1.000, 0.814 y grupo
+     * 4.100 con 205/45R16 (1,87 m de circunferencia). km/h por 1000 rpm =
+     * 60 * circunferencia / (relacion * grupo):
+     *   8.73, 14.50, 20.58, 27.37, 33.62
+     * A 3000 rpm en quinta salen 101 km/h, que es lo que marca el coche. */
     { "MAZDA_MX5_NB2", "Mazda MX-5 NB2", OBD_PROTO_KLINE,
       0xBE1FB811u, 0x80000000u, 0x00000000u,
-      8000, 7000, 7200, OBD_CENTRE_MAF, 0 },
+      8000, 7000, 7200, OBD_CENTRE_MAF, 0,
+      { 8.73f, 14.50f, 20.58f, 27.37f, 33.62f, 0.0f } },
     { "GENERIC_CAN", "Generic CAN", OBD_PROTO_CAN,
       OBD_VEHICLE_ANY_MASK, OBD_VEHICLE_ANY_MASK, OBD_VEHICLE_ANY_MASK,
-      7000, 6500, 0, OBD_CENTRE_FROM_CAPS, 1 },
+      7000, 6500, 0, OBD_CENTRE_FROM_CAPS, 1, { 0 } },
     { "GENERIC_KLINE", "Generic K-line", OBD_PROTO_KLINE,
       OBD_VEHICLE_ANY_MASK, OBD_VEHICLE_ANY_MASK, OBD_VEHICLE_ANY_MASK,
-      7000, 6500, 0, OBD_CENTRE_FROM_CAPS, 1 }
+      7000, 6500, 0, OBD_CENTRE_FROM_CAPS, 1, { 0 } }
 };
 
 #define PROFILE_COUNT ((int)(sizeof(g_profiles) / sizeof(g_profiles[0])))
@@ -133,3 +141,34 @@ const obd_vehicle_profile *obd_vehicle_match(int proto, uint32_t mask1,
     }
     return &g_profiles[PROFILE_COUNT - 1];
 }
+
+int obd_vehicle_gear(const float *gear_kmh, float rpm, float speed_kmh)
+{
+    if (gear_kmh == NULL || rpm < 500.0f || speed_kmh < 3.0f) {
+        return 0;
+    }
+
+    /* km/h que deberia marcar en cada marcha a esas rpm. */
+    int best = 0;
+    float best_err = 0.0f;
+    for (int g = 0; g < 6; g++) {
+        if (gear_kmh[g] <= 0.0f) {
+            break;
+        }
+        float expected = rpm / 1000.0f * gear_kmh[g];
+        if (expected < 1.0f) {
+            continue;
+        }
+        float err = (speed_kmh > expected) ? (speed_kmh - expected) / expected
+                                          : (expected - speed_kmh) / expected;
+        if (best == 0 || err < best_err) {
+            best = g + 1;
+            best_err = err;
+        }
+    }
+
+    /* Un 10% de margen: entre marchas hay mas de un 15% de diferencia, asi
+     * que con esto no se confunde una con otra por ruido de redondeo. */
+    return (best_err <= 0.10f) ? best : 0;
+}
+
