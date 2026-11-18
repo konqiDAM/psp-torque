@@ -9,6 +9,7 @@ OBJS = src/psp/main.o \
        src/core/discovery.o \
        src/core/smooth.o \
        src/core/vehicle.o \
+       src/core/dtc.o \
        src/psp/gui.o \
        src/psp/gfx.o \
        src/psp/audio.o
