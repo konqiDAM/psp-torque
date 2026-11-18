@@ -140,7 +140,7 @@ static char g_proto[32] = "?";
 /* FASE U3: pantalla de arranque elegida y herramientas ocultas. Van aqui
  * arriba porque el selector las consulta antes que nada. */
 static int g_start_mode = -1;       /* -1 = la ultima pantalla (last=) */
-static uint8_t g_hidden_mask = 0;   /* bits MODE_* que no se ofrecen */
+static uint16_t g_hidden_mask = 0;  /* bits MODE_* que no se ofrecen (son 9) */
 /* Perfil detectado en esta sesion: clave de v.<id>.* y lo que decide si
  * la vista es de este coche o la global. */
 static char g_vehicle_id[24] = "";
@@ -1230,6 +1230,47 @@ static void proto_load(void)
     }
 }
 
+/* Comparacion sin distinguir mayusculas, para nombres de pantalla. */
+static int name_matches(const char *a, const char *b)
+{
+    while (*a != '\0' || *b != '\0') {
+        char ca = *a;
+        char cb = *b;
+        if (ca >= 'a' && ca <= 'z') {
+            ca = (char)(ca - 'a' + 'A');
+        }
+        if (cb >= 'a' && cb <= 'z') {
+            cb = (char)(cb - 'a' + 'A');
+        }
+        if (ca != cb) {
+            return 0;
+        }
+        a++;
+        b++;
+    }
+    return 1;
+}
+
+/* Nombre canonico de cada pantalla, el que se escribe en el fichero. No
+ * pasa por tr(): si se guardase el nombre traducido, un fichero escrito
+ * en ingles no se entenderia al arrancar en espanol, que es justo cuando
+ * se lee g_lang todavia sin resolver. */
+static const char *mode_key(int mode)
+{
+    switch (mode) {
+    case MODE_QV:        return "GENERAL";
+    case MODE_ENGINE:    return "MOTOR";
+    case MODE_MOTOR:     return "DIAG";
+    case MODE_TELEMETRY: return "TELEM";
+    case MODE_MODULES:   return "MODULOS";
+    case MODE_SNIFFER:   return "SNIFFER";
+    case MODE_INFO:      return "INFO";
+    case MODE_PROBE:     return "SONDA";
+    case MODE_FALLOS:    return "FALLOS";
+    default:             return "";
+    }
+}
+
 /* Nombre de pantalla a modo. Acepta los nombres que se ven en la barra y
  * tambien el numero, que es lo que escribe el propio programa. */
 static int mode_from_name(const char *name)
@@ -1241,22 +1282,14 @@ static int mode_from_name(const char *name)
         int m = name[0] - '0';
         return (m >= 0 && m < MODE_COUNT) ? m : -1;
     }
+    /* Se aceptan los dos idiomas: un fichero escrito por una version que
+     * guardaba el nombre traducido tiene que seguir leyendose. */
+    static const char *const en[MODE_COUNT] = {
+        "GENERAL", "ENGINE", "DIAG", "TELEM", "MODULES", "SNIFFER",
+        "INFO", "PROBE", "FAULTS"
+    };
     for (int m = 0; m < MODE_COUNT; m++) {
-        const char *a = mode_name(m);
-        const char *b = name;
-        int same = 1;
-        while (*a != '\0' || *b != '\0') {
-            char ca = *a, cb = *b;
-            if (ca >= 'a' && ca <= 'z') ca = (char)(ca - 'a' + 'A');
-            if (cb >= 'a' && cb <= 'z') cb = (char)(cb - 'a' + 'A');
-            if (ca != cb) {
-                same = 0;
-                break;
-            }
-            a++;
-            b++;
-        }
-        if (same) {
+        if (name_matches(mode_key(m), name) || name_matches(en[m], name)) {
             return m;
         }
     }
@@ -1267,9 +1300,9 @@ static int mode_from_name(const char *name)
 }
 
 /* "hidden=SNIFFER,SONDA" -> mascara de modos. */
-static uint8_t mode_hidden_parse(const char *val)
+static uint16_t mode_hidden_parse(const char *val)
 {
-    uint8_t mask = 0;
+    uint16_t mask = 0;
     char buf[96];
     snprintf(buf, sizeof(buf), "%s", val);
 
@@ -1289,7 +1322,7 @@ static uint8_t mode_hidden_parse(const char *val)
         *p = '\0';
         int m = mode_from_name(start);
         if (m >= 0 && m < MODE_COUNT) {
-            mask = (uint8_t)(mask | (1u << m));
+            mask = (uint16_t)(mask | (1u << m));
         }
         if (saved == '\0') {
             break;
@@ -1322,17 +1355,31 @@ static void prefs_parse_key(const char *key, const char *val)
 
     if (strncmp(sk, "slot", 4) == 0 && sk[4] >= '0' && sk[4] <= '5') {
         int si = sk[4] - '0';
+        int v = atoi(val);
+        /* Un fichero se puede editar a mano: se valida igual que las
+         * claves globales, o un 999 acaba indexando fuera de la tabla de
+         * nombres al pintar el editor. */
         if (strcmp(sk + 5, "_item") == 0) {
-            vp->slot_item[si] = atoi(val);
+            if (v < 0 || v >= W_COUNT) {
+                v = W_RPM;
+            }
+            vp->slot_item[si] = v;
             vp->has_layout = 1;
         } else if (strcmp(sk + 5, "_style") == 0) {
-            vp->slot_style[si] = atoi(val);
+            if (v < 0 || v >= STYLE_COUNT) {
+                v = STYLE_TEXT;
+            }
+            vp->slot_style[si] = v;
             vp->has_layout = 1;
         }
     } else if (strncmp(sk, "tel", 3) == 0 && sk[3] >= '0' && sk[3] <= '4') {
         int ti = sk[3] - '0';
+        int v = atoi(val);
         if (strcmp(sk + 4, "_item") == 0) {
-            vp->tel_item[ti] = atoi(val);
+            if (v < W_OFF || v >= W_COUNT) {
+                v = W_OFF;
+            }
+            vp->tel_item[ti] = v;
             vp->has_layout = 1;
         }
     } else if (strcmp(sk, "rpm_max") == 0) {
@@ -1356,7 +1403,7 @@ static const char *hidden_names_join(void)
         if (buf[0] != '\0') {
             strncat(buf, ",", sizeof(buf) - strlen(buf) - 1);
         }
-        strncat(buf, mode_name(m), sizeof(buf) - strlen(buf) - 1);
+        strncat(buf, mode_key(m), sizeof(buf) - strlen(buf) - 1);
     }
     return buf;
 }
@@ -1630,7 +1677,8 @@ static void settings_load(void)
 
     log_file_printf("Ajustes: tema=%s contraste=%d animacion=%s%s\n",
                     gfx_theme_name(g_cfg.theme), g_cfg.contrast,
-                    g_cfg.anim ? "SI" : "NO",
+                    g_cfg.anim == 0 ? "NO"
+                                    : (g_cfg.anim == 1 ? "MITO" : "MX-5"),
                     g_layout_user ? " vista=PROPIA" : " vista=FABRICA");
 }
 
@@ -1657,7 +1705,7 @@ static void settings_save(void)
                      "3=AZZURRO 4=MONO 5=FORZA 6=NFS "
                      "7=GRAN TURISMO 8=INITIAL D\n"
                      "# contraste: 0=BAJO 1=NORMAL 2=ALTO\n"
-                     "# animacion: 0=NO 1=SI\n"
+                     "# animacion: 0=NO 1=MITO 2=MX-5\n"
                      "# rapido: 0=COMPLETO 1=RAPIDO\n"
                      "# pico: 0=NO 1=SI\n"
                      "# suavizado: 0=NO 1=SI\n"
@@ -1710,17 +1758,18 @@ static void settings_save(void)
                      g_cfg.smooth, g_cfg.shift_rpm, g_cfg.rpm_max,
                      g_cfg.units, g_cfg.boost_auto,
                      g_cfg.boost_peak, g_cfg.boost_max,
-                     g_slot_item[0], g_slot_style[0],
-                     g_slot_item[1], g_slot_style[1],
-                     g_slot_item[2], g_slot_style[2],
-                     g_slot_item[3], g_slot_style[3],
-                     g_slot_item[4], g_slot_style[4],
-                     g_slot_item[5], g_slot_style[5],
-                     g_tel_item[0], g_tel_item[1], g_tel_item[2],
-                     g_tel_item[3], g_tel_item[4],
+                     g_global_slot_item[0], g_global_slot_style[0],
+                     g_global_slot_item[1], g_global_slot_style[1],
+                     g_global_slot_item[2], g_global_slot_style[2],
+                     g_global_slot_item[3], g_global_slot_style[3],
+                     g_global_slot_item[4], g_global_slot_style[4],
+                     g_global_slot_item[5], g_global_slot_style[5],
+                     g_global_tel_item[0], g_global_tel_item[1],
+                     g_global_tel_item[2], g_global_tel_item[3],
+                     g_global_tel_item[4],
                      g_cfg.show_fps, g_cfg.debug, g_elm_min_gap_ms, g_mode,
                      g_cfg.profile,
-                     g_start_mode >= 0 ? mode_name(g_start_mode) : "last",
+                     g_start_mode >= 0 ? mode_key(g_start_mode) : "last",
                      hidden_names_join());
     if (n > (int)sizeof(buf) - 1) {
         n = (int)sizeof(buf) - 1;
@@ -1728,6 +1777,36 @@ static void settings_save(void)
     if (n > 0) {
         sceIoWrite(fd, buf, (unsigned int)n);
     }
+    /* Vista de cada coche, en lineas aparte para no engordar el buffer de
+     * arriba: v.<id>.slotN_item=... Solo los coches que tengan algo
+     * guardado, y nunca las claves globales de arriba. */
+    char line[72];
+    for (int c = 0; c < g_car_prefs_count; c++) {
+        const vehicle_prefs *vp = &g_car_prefs[c];
+        if (!vp->has_layout) {
+            continue;
+        }
+        for (int k = 0; k < DASH_SLOTS; k++) {
+            int n = snprintf(line, sizeof(line), "v.%s.slot%d_item=%d\n",
+                             vp->id, k, vp->slot_item[k]);
+            if (n > 0 && n < (int)sizeof(line)) {
+                sceIoWrite(fd, line, (unsigned)n);
+            }
+            n = snprintf(line, sizeof(line), "v.%s.slot%d_style=%d\n",
+                         vp->id, k, vp->slot_style[k]);
+            if (n > 0 && n < (int)sizeof(line)) {
+                sceIoWrite(fd, line, (unsigned)n);
+            }
+        }
+        for (int k = 0; k < TEL_SLOTS; k++) {
+            int n = snprintf(line, sizeof(line), "v.%s.tel%d_item=%d\n",
+                             vp->id, k, vp->tel_item[k]);
+            if (n > 0 && n < (int)sizeof(line)) {
+                sceIoWrite(fd, line, (unsigned)n);
+            }
+        }
+    }
+
     sceIoSync("ms0:", 0);
     sceIoClose(fd);
 
@@ -2976,6 +3055,10 @@ static void vehicle_detect(void)
         proto, g_mask1, g_mask2, g_mask3, g_cfg.profile, &exact);
 
     if (p == NULL) {
+        /* Sin identidad no hay vista de coche: lo que se edite va a la
+         * global, no a las preferencias del coche anterior. */
+        g_vehicle_id[0] = '\0';
+        layout_apply_for_car();
         log_file_printf("Vehiculo: sin perfil (proto %s, mascaras %08X/%08X/%08X)\n",
                         g_proto, g_mask1, g_mask2, g_mask3);
         return;
@@ -7644,6 +7727,7 @@ static void run_fallos(int sock)
     }
 
     g_dtc_state = 1;
+    g_net_busy = 1;   /* que se pinte el aviso mientras lee */
     g_dtc_stored_n = 0;
     g_dtc_pending_n = 0;
     g_dtc_permanent_n = 0;
@@ -7701,6 +7785,8 @@ static void run_fallos(int sock)
                     g_dtc_stored_n, g_dtc_pending_n, g_dtc_permanent_n);
     log_sync();
 
+    g_net_busy = 0;
+    net_ui_set("");
     g_dtc_state = 2;
     g_dtc_note[0] = '\0';
 }
@@ -7740,9 +7826,6 @@ static void draw_fallos(void)
         gfx_text(8, y, g_dtc_note, QV_AMBER, 1);
         return;
     }
-
-    static const int group_n[3] = { 0, 0, 0 };
-    (void)group_n;
 
     const char *names[3] = { tr("GUARDADOS"), tr("PENDIENTES"),
                              tr("PERMANENTES") };
