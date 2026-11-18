@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.53 2026-11-18 plan sin bucle cuesta abajo, muestra valida tres ciclos, SALIR visible"
+#define BUILD_TAG "fase2.54 2026-11-18 revision: salida en pantallas con bucle, fila del congelado, identidad al conectar"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -550,10 +550,17 @@ static void data_note_sample(uint32_t now)
 {
     if (g_last_sample_ms != 0 && now > g_last_sample_ms) {
         uint32_t iv = now - g_last_sample_ms;
-        if (iv < 10000u) {
-            g_sample_iv_ms = g_sample_iv_ms
-                                 ? (g_sample_iv_ms * 7u + iv) / 8u
-                                 : iv;
+        if (g_sample_iv_ms == 0) {
+            /* Primera muestra: marca la cadencia. */
+            if (iv < 10000u) {
+                g_sample_iv_ms = iv;
+            }
+        } else if (iv <= g_sample_iv_ms * 2u + 50u) {
+            /* Solo entran los huecos de cadencia. Una pausa de varios
+             * segundos (FALLOS, escaneo, menu) no es el enlace: colarla en
+             * la media dejaba los umbrales flojos un rato en un coche
+             * rapido. */
+            g_sample_iv_ms = (g_sample_iv_ms * 7u + iv) / 8u;
         }
     }
     g_last_sample_ms = now;
@@ -972,8 +979,6 @@ static const char *tr(const char *key)
         { "CERRAR APP", "CLOSE APP" },
         { "ARRIBA/ABAJO: ELEGIR   IZQ/DER: CAMBIAR",
           "UP/DOWN: SELECT   LEFT/RIGHT: CHANGE" },
-        { "X: GUARDAR   CIRCLE: BORRAR TURBO   START: SALIR",
-          "X: SAVE   CIRCLE: CLEAR TURBO   START: EXIT" },
         { "PANTALLAS", "SCREENS" },
         { "HERRAMIENTAS", "TOOLS" },
         { "L/R: VOLVER", "L/R: BACK" },
@@ -1012,8 +1017,8 @@ static const char *tr(const char *key)
         { "FALLOS", "FAULTS" },
         { "CONGELADO", "FREEZE FRAME" },
         { "SIN MODO 02", "NO MODE 02" },
-        { "X: GUARDAR   START: CERRAR   MANTENER START: SALIR",
-          "X: SAVE   START: CLOSE   HOLD START: EXIT" },
+        { "X: GUARDAR  START: CERRAR  MANTENER START: SALIR",
+          "X: SAVE  START: CLOSE  HOLD START: EXIT" },
         { "LOG COMPLETO", "FULL LOG" },
         { "Codigos de averia", "Fault codes" },
         { "GUARDADOS", "STORED" },
@@ -1043,6 +1048,12 @@ static const char *tr(const char *key)
 static int g_settings_open = 0;
 static int g_settings_sel = 0;
 static int g_exit_request = 0;
+
+/* START mantenido para salir. Vive fuera del bucle del cuadro porque las
+ * pantallas con bucle propio (sniffer) y las esperas bloqueantes del
+ * ELM327 no vuelven al bucle hasta terminar, y ahi es justo donde el
+ * usuario concluye que la app se ha colgado. */
+static void exit_hold_tick(uint32_t now, unsigned int buttons);
 
 /* Estado grafico y de conexion en segundo plano. */
 static int g_gfx_active = 0;
@@ -3061,6 +3072,12 @@ static void elm_send_and_read(int sock, const char *cmd, int wait_ms,
 
     for (;;) {
         net_ui_tick();
+        if (g_exit_request) {
+            /* Se sale: no tiene sentido esperar la respuesta. El llamante
+             * desenrolla y el bucle principal cierra la sesion. */
+            rx.active = 0;
+            break;
+        }
         if (elm_rx_step(&rx) != ELM_RX_PENDING) {
             break;
         }
@@ -3227,17 +3244,24 @@ static void vehicle_detect(void)
         return;
     }
 
-    /* Sin un ATDPN concreto no se afirma identidad: justo despues de
-     * ATSP0 el adaptador contesta "A0" (automatico, protocolo aun sin
-     * elegir) y en ese momento cualquier mascara casa con el generico.
-     * Como la deteccion se hace una sola vez por conexion, el coche se
-     * quedaba sin perfil para el resto de la sesion: paso el 18/11/2026
-     * con la MX-5, que salio como "Generic K-line" (tacometro 7000, sin
-     * zona roja y sin relaciones de cambio) mientras el ATDPN ya decia
-     * A3 dos lineas mas abajo en el log. */
-    if (obd_vehicle_proto_class(g_proto) == OBD_PROTO_ANY) {
-        log_file_printf("Vehiculo: pendiente (proto %s)\n", g_proto);
-        return;
+    /* "A0" es el unico estado en el que el adaptador aun no ha elegido
+     * protocolo: justo despues de ATSP0 contesta eso, y en ese momento
+     * cualquier mascara casa con el generico. Como la deteccion se hace
+     * una sola vez por conexion, el coche se quedaba sin perfil para el
+     * resto de la sesion: paso el 18/11/2026 con la MX-5, que salio como
+     * "Generic K-line" mientras el ATDPN ya decia A3 dos lineas mas abajo.
+     *
+     * Se mira el texto y no la clase: un coche J1850 (protocolo 1 o 2)
+     * tambien da clase ANY, y ahi lo correcto es intentar el emparejamiento
+     * y quedarse sin perfil, no esperar para siempre. */
+    {
+        size_t pn = strlen(g_proto);
+        int pending = (pn == 0) || (strcmp(g_proto, "?") == 0) ||
+                      (g_proto[pn - 1] == '0');
+        if (pending) {
+            log_file_printf("Vehiculo: pendiente (proto %s)\n", g_proto);
+            return;
+        }
     }
 
     g_vehicle_seen = 1;
@@ -3574,6 +3598,13 @@ static int connect_network_and_elm(Target *targets, int *target_count,
     g_mask2 = 0;
     g_mask3 = 0;
     g_vehicle_seen = 0;
+    /* Identidad de la conexion anterior: si esta no se llega a detectar (un
+     * ATDPN perdido, el coche callado), el cuadro no puede quedarse con el
+     * tacometro, el centro ni las preferencias del coche que acaba de irse. */
+    g_vehicle_id[0] = '\0';
+    g_vehicle_name[0] = '\0';
+    g_vehicle_centre = OBD_CENTRE_FROM_CAPS;
+    vehicle_release_tacho();
     /* Codigos de la sesion anterior: la lampara del coche que acaba de
      * irse no puede quedarse encendida en la barra del siguiente. */
     g_dtc_mil = -1;
@@ -7043,10 +7074,10 @@ static void draw_settings_overlay(void)
                        value_color, 1);
     }
 
-    gfx_text((int)x + 16, (int)(y + h) - 20,
-             "ARRIBA/ABAJO: ELEGIR   IZQ/DER: CAMBIAR", QV_DIM, 1);
-    gfx_text((int)x + 16, (int)(y + h) - 10,
-             tr("X: GUARDAR   START: CERRAR   MANTENER START: SALIR"),
+    gfx_text((int)x + 12, (int)(y + h) - 20,
+             tr("ARRIBA/ABAJO: ELEGIR   IZQ/DER: CAMBIAR"), QV_DIM, 1);
+    gfx_text((int)x + 12, (int)(y + h) - 10,
+             tr("X: GUARDAR  START: CERRAR  MANTENER START: SALIR"),
              QV_DIM, 1);
 }
 
@@ -7178,6 +7209,27 @@ static void draw_net_banner(void)
     g_gfx_dim = saved_dim;
 }
 
+static uint32_t g_start_down_ms = 0;
+static int g_start_exit_latched = 0;
+
+static void exit_hold_tick(uint32_t now, unsigned int buttons)
+{
+    if (buttons & PSP_CTRL_START) {
+        if (g_start_down_ms == 0) {
+            g_start_down_ms = now ? now : 1;
+        } else if (!g_start_exit_latched &&
+                   (uint32_t)(now - g_start_down_ms) >= 1200u) {
+            g_start_exit_latched = 1;
+            g_exit_request = 1;
+            log_file_printf("Salida: START mantenido\n");
+            log_sync();
+        }
+    } else {
+        g_start_down_ms = 0;
+        g_start_exit_latched = 0;
+    }
+}
+
 static void run_sniff(int sock)
 {
     if (g_snif_running) {
@@ -7231,6 +7283,11 @@ static void run_sniff(int sock)
         memset(&pad, 0, sizeof(pad));
         sceCtrlReadBufferPositive(&pad, 1);
         if (pad.Buttons & (PSP_CTRL_CIRCLE | PSP_CTRL_CROSS)) {
+            running = 0;
+            continue;
+        }
+        exit_hold_tick(now_ms(), pad.Buttons);
+        if (g_exit_request) {
             running = 0;
             continue;
         }
@@ -8172,12 +8229,22 @@ static void draw_fallos(void)
         y += 4;
     }
 
-    /* La foto del fallo, si la hay: es lo que estaba pasando cuando salto. */
-    if (!g_ff_valid && g_dtc_stored_n > 0 && !g_ff_offered) {
+    /* La foto del fallo, si la hay: es lo que estaba pasando cuando salto.
+     * La columna de los datos se calcula con el ancho real de la etiqueta:
+     * con 52 fijos, "CONGELADO" llegaba a x=86 y se comia el principio del
+     * valor, y en ingles "FREEZE FRAME" llegaba a 113. */
+    if (g_dtc_stored_n > 0) {
+        int fx = 8 + gfx_text_width(tr("CONGELADO"), 1) + 16;
         gfx_text(8, 232, tr("CONGELADO"), QV_CYAN, 1);
-        gfx_text(52, 232, tr("SIN MODO 02"), QV_DIM, 1);
+        if (!g_ff_valid) {
+            /* Dos razones distintas para una fila vacia: la ECU no da el
+             * modo 02, o lo da y no contesto. Antes las dos se callaban. */
+            gfx_text(fx, 232, g_ff_offered ? "SIN DATOS"
+                                           : tr("SIN MODO 02"), QV_DIM, 1);
+        }
     }
     if (g_ff_valid) {
+        int fx = 8 + gfx_text_width(tr("CONGELADO"), 1) + 16;
         gfx_text(8, 232, tr("CONGELADO"), QV_CYAN, 1);
         char a[12] = "N/D", b[12] = "N/D", c[12] = "N/D", e[12] = "N/D";
         if (g_ff_rpm >= 0) {
@@ -8194,7 +8261,7 @@ static void draw_fallos(void)
         }
         snprintf(line, sizeof(line), "%s rpm  %s km/h  %s C  %s%%",
                  a, b, c, e);
-        gfx_text(52, 232, line, QV_DIM, 1);
+        gfx_text(fx, 232, line, QV_DIM, 1);
     }
 
     gfx_text(8, 254, tr("X: LEER   CIRCLE: LIMPIAR PANTALLA"), QV_DIM, 1);
@@ -9091,6 +9158,11 @@ static void net_ui_set(const char *msg)
  * esperas de red para que el usuario vea progreso sin pantallas negras. */
 static void net_ui_tick(void)
 {
+    SceCtrlData pad;
+    memset(&pad, 0, sizeof(pad));
+    sceCtrlReadBufferPositive(&pad, 1);
+    exit_hold_tick(now_ms(), pad.Buttons);
+
     if (!g_gfx_active || !g_net_busy) {
         return;
     }
@@ -9703,8 +9775,6 @@ static void run_dashboard(Target *targets, int target_count)
     /* L+R mantenidos 1,5 s: activa/desactiva el modo demo. */
     uint32_t chord_since = 0;
     int chord_done = 0;
-    uint32_t start_since = 0;   /* START mantenido: salir de la app */
-    int start_exit_done = 0;
 
     /* FASE D1: peticion OBD en vuelo (una sola). */
     elm_rx rx;
@@ -9762,18 +9832,7 @@ static void run_dashboard(Target *targets, int target_count)
          * no se ejecuta nada de eso y el log se queda sin cierre, que es
          * exactamente lo que paso el 18/11/2026. Una pulsacion corta sigue
          * abriendo y cerrando el menu. */
-        if (pad.Buttons & PSP_CTRL_START) {
-            if (start_since == 0) {
-                start_since = now ? now : 1;
-            } else if (!start_exit_done &&
-                       (uint32_t)(now - start_since) >= 1200u) {
-                start_exit_done = 1;
-                g_exit_request = 1;
-            }
-        } else {
-            start_since = 0;
-            start_exit_done = 0;
-        }
+        exit_hold_tick(now, pad.Buttons);
 
         /* Reintento de conexion; deshabilitado con los ajustes abiertos.
          * El selector de pantallas se cierra antes: si no, taparia el
@@ -10209,7 +10268,7 @@ static void run_dashboard(Target *targets, int target_count)
                         log_file_printf(
                             "Enlace: %.2f req/s entregadas, pedidas %.2f; "
                             "plan %.2f req/s (%s)\n",
-                            rate, g_plan_demand, g_link_measured,
+                            rate, asked, g_link_measured,
                             g_link_plan.compressed ? "comprimido" : "holgado");
                         log_sync();
                         apply_screen_schedule(now);
