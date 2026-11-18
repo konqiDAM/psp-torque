@@ -81,6 +81,14 @@ PSP_HEAP_SIZE_KB(4096);
 #define MAX_TARGETS 4
 #define BUILD_TAG "fase2.49 2026-11-18 perfil tras fijar protocolo, recuperacion de ECU en silencio, sin modo 02"
 #define CMD_TIMEOUT_MS 500
+
+/* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
+ * de 500: cortar ahi deja la respuesta sin prompt, el '>' llega cuando ya
+ * se ha enviado el comando siguiente y el adaptador contesta STOPPED. El
+ * log del 18/11/2026 tiene ocho de esos por cada 360 peticiones, cada uno
+ * con un reintento y un PID perdido. En CAN se queda en 500, que es el
+ * valor calibrado del MiTo. */
+#define CMD_TIMEOUT_KLINE_MS 1000
 /* Si el adaptador ha demostrado que envia el prompt '>', hay que esperarlo
  * antes de mandar el siguiente comando. El ELM327 hace tareas internas
  * despues de responder y, si le llega otro comando, contesta STOPPED y se
@@ -3009,6 +3017,16 @@ static void elm_send_and_read(int sock, const char *cmd, int wait_ms,
 /* Envio de la siguiente peticion OBD (FASE C).                       */
 /* ------------------------------------------------------------------ */
 
+/* Tiempo maximo de una peticion de PID, segun lo que tarde el bus. */
+static int cmd_timeout_ms(void)
+{
+    int cls = obd_vehicle_proto_class(g_proto);
+    if (cls == OBD_PROTO_ISO9141 || cls == OBD_PROTO_KWP) {
+        return CMD_TIMEOUT_KLINE_MS;
+    }
+    return CMD_TIMEOUT_MS;
+}
+
 /* Envia el PID que toque segun el planificador. Devuelve 1 si se ha
  * enviado, 0 si no tocaba nada y -1 si el envio ha fallado.
  *
@@ -3039,7 +3057,7 @@ static int obd_send_next(int sock, elm_rx *rx, int *rx_idx, uint8_t *rx_pid,
     *rx_pid = pid;
     *rx_t0 = now_ms();
 
-    if (elm_rx_start(rx, sock, cmd, CMD_TIMEOUT_MS) < 0) {
+    if (elm_rx_start(rx, sock, cmd, cmd_timeout_ms()) < 0) {
         /* El socket esta muerto. Se libera el PID como si fuera un
          * timeout (no como "no soportado") para que el planificador no
          * se quede colgado con la peticion en vuelo. */
