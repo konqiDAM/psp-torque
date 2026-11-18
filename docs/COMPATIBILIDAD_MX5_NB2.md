@@ -116,8 +116,55 @@ not depend on the probe being run. `profile=MAZDA_MX5_NB2` in `settings.txt` for
 and the log then says `forzado`. On any car without a matching profile nothing changes:
 the tacho and red zone stay as the person set them.
 
-Still open in `src/core/vehicle.c`: the centre gauge switch (the field is in the table,
-the rendering is not wired yet) and a per-vehicle default layout.
+The centre gauge switch is wired since `fase2.46` (`g_vehicle_centre` chooses between
+BOOST, MAF and load, and the GENERAL panel draws whichever it gets), so this car shows
+MAF in the middle with or without a profile.
+
+Until `fase2.49` the detection did not work on this car: it ran while the adapter still
+answered `ATDPN` with `A0`, and with no protocol class no profile can match, so the log
+said `Vehiculo: Generic K-line (generico, proto A0, ...) tacometro=7000 rojo=0 corte=0`
+while the very next line already said `ATDPN (conexion): A3`. The protocol is now
+reread before the scheduler is built, and detection refuses to latch while it is
+unknown. `tests/test_vehicle.c` pins both sides of that border.
+
+## 3c. What the 18/11/2026 session showed
+
+`phase1_006.log`, 198 s, engine idling and warming up, car stationary, `fase2.48`:
+
+```
+Vehiculo: Generic K-line (generico, proto A0, mascaras BE1FB811/80000000/00000000)
+ATDPN (conexion): A3
+Enlace: 2.30 req/s entregadas, pedidas 2.44; plan 2.20 req/s (comprimido)
+t=154 rpm=2137 ect=67 iat=27 spd=0 load=31 maf=3.01
+```
+
+| Reading | Value over the session |
+|---|---|
+| rpm | 1002 → 820 idle once warm, blips to 1433 and 2137 |
+| coolant | 40 → 67 °C (warming from cold, never reached thermostat) |
+| intake air | 23–27 °C |
+| MAF | 3.0–3.7 g/s at idle |
+| engine load | 12–18 % |
+| timing advance | 43.5° |
+| throttle | 0 % (the car has `11` but not `49`/`4A`, so this is the plate, not the pedal) |
+
+Three things came out of it:
+
+1. **The profile bug above.** The car answered `4100BE1FB811` exactly as expected and
+   still came out generic. Fixed in `fase2.49`.
+2. **A silent ECU left the screen frozen.** The last 28 s of the log are 55 consecutive
+   `NO DATA` replies while the adapter itself answered every command: the engine was
+   switched off and the app kept showing the last good rpm. A NO DATA reply carries
+   bytes, so the dead-link counter never fired. Twenty in a row now escalate to the
+   reconnect path. If the ignition comes back the app reconnects on its own; if it
+   does not, the retries stop after three and `TRIANGLE` reconnects by hand.
+3. **No freeze frame on this car.** `0100` bit `02` is clear, so mode 02 does not
+   exist: `FALLOS` can list stored, pending and permanent codes but can never show the
+   frame that was running when the fault set. The screen now says `SIN MODO 02` rather
+   than leaving the row empty, and the app no longer spends five requests asking.
+
+Not yet exercised on this car: the `FALLOS` screen itself (mode 03/07/0A), the gear
+indicator (needs the profile, so it read `N/D` all session), and any driving data.
 
 ## 4. Design consequences
 
