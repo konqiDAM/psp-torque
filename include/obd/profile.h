@@ -161,11 +161,15 @@ int obd_forced_set_has(const obd_forced_set *set, uint8_t pid);
  * golpe de timeouts dejaria el plan en un solo PID. */
 #define PROFILE_LINK_RATE_FLOOR 0.8f
 
-/* Lo que el plan garantiza: RPM a 1 Hz y hasta tres valores de la pantalla
- * activa con el resto. Cuatro valores a 0,5 Hz mas el RPM son 3 req/s, que
- * este enlace no tiene (1,879 medidos): por eso son tres. */
+/* Lo que el plan garantiza: RPM a 1 Hz y hasta cuatro valores de la
+ * pantalla activa con el resto.
+ *
+ * Eran tres. La vista de fabrica de un coche sin MAP pinta cuatro (velocidad,
+ * IAT, MAF y avance), asi que el cuarto se quedaba en el fondo: 60 s. Con
+ * cuatro, el presupuesto de la MX-5 (1.87 req/s) deja 0.2175 Hz por valor,
+ * unos 4.1 s cada uno, y el RPM sigue a 1 Hz. */
 #define PROFILE_PLAN_RPM_HZ      1.0f
-#define PROFILE_PLAN_MAX_VALUES  3
+#define PROFILE_PLAN_MAX_VALUES  4
 
 /* Un PID que no esta en pantalla, cuando hay que repartir. */
 #define PROFILE_PLAN_BG_PERIOD_MS 60000u

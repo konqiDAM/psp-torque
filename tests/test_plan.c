@@ -54,13 +54,13 @@ static void test_plan_kline_arithmetic(void)
     uint16_t rpm = obd_plan_period(&plan, 0x0C, 1, 0, 3);
     CHECK(rpm == 468);
 
-    /* Tres valores mas con lo que queda: (1.597 - 1.0) / 3 = 0.199 Hz,
-     * o sea 1000/0.199 - 532 = 4492 ms. El margen cubre el redondeo. */
-    uint16_t v = obd_plan_period(&plan, 0x0D, 1, 1, 3);
-    CHECK(v > 4400 && v < 4600);
+    /* Cuatro valores con lo que queda: (1.597 - 1.0) / 4 = 0.149 Hz,
+     * o sea 1000/0.149 - 532 = 6179 ms. El margen cubre el redondeo. */
+    uint16_t v = obd_plan_period(&plan, 0x0D, 1, 1, 4);
+    CHECK(v > 6000 && v < 6300);
 
-    /* El cuarto valor ya no cabe: a fondo. */
-    CHECK(obd_plan_period(&plan, 0x11, 1, 4, 4) == PROFILE_PLAN_BG_PERIOD_MS);
+    /* El quinto valor ya no cabe: a fondo. */
+    CHECK(obd_plan_period(&plan, 0x11, 1, 5, 5) == PROFILE_PLAN_BG_PERIOD_MS);
 
     /* Y lo que no se ve, tambien a fondo. */
     CHECK(obd_plan_period(&plan, 0x14, 0, 0, 3) == PROFILE_PLAN_BG_PERIOD_MS);

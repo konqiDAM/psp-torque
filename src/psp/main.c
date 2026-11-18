@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.59 2026-11-18 avance y mariposa con rango propio en el plan, series migradas, tiles legibles"
+#define BUILD_TAG "fase2.60 2026-11-18 cuatro valores financiados, series migradas tambien por coche, tiles limpios"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -939,6 +939,29 @@ static void layout_apply_for_car(void)
         memcpy(g_slot_item, p->slot_item, sizeof(g_slot_item));
         memcpy(g_slot_style, p->slot_style, sizeof(g_slot_style));
         memcpy(g_tel_item, p->tel_item, sizeof(g_tel_item));
+        /* El bloque del coche pudo guardarse antes de fase2.58 con el juego
+         * viejo dentro, aunque el usuario no tocase las series: prefs_capture
+         * copia el array entero en cualquier edicion de la vista. Se migra
+         * aqui tambien, con la misma regla exacta. */
+        {
+            static const int old_tel[TEL_SLOTS] = { W_RPM, W_BOOST, W_ECT,
+                                                    W_SPEED, W_OFF };
+            static const int new_tel[TEL_SLOTS] = { W_RPM, W_BOOST,
+                                                    W_TIMING, W_THR,
+                                                    W_OFF };
+            int is_old = 1;
+            for (int i = 0; i < TEL_SLOTS; i++) {
+                if (g_tel_item[i] != old_tel[i]) {
+                    is_old = 0;
+                }
+            }
+            if (is_old) {
+                for (int i = 0; i < TEL_SLOTS; i++) {
+                    g_tel_item[i] = new_tel[i];
+                    p->tel_item[i] = new_tel[i];
+                }
+            }
+        }
         /* La vista es de este coche: el overlay por capacidad no opina. */
         g_layout_user = 1;
     } else {
@@ -1120,6 +1143,17 @@ static uint32_t g_hist_valid[HIST_MAX];
 static int g_hist_pos = 0;
 static int g_hist_count = 0;
 static unsigned int g_hist_last = 0;
+
+/* Reinicio completo del historial: contadores y marcas de validez. Sin las
+ * marcas, series_stats sigue viendo las 180 casillas viejas y las casillas
+ * de MAX/MIN ensenan los extremos de la sesion anterior. */
+static void hist_reset(void)
+{
+    g_hist_count = 0;
+    g_hist_pos = 0;
+    g_hist_last = 0;
+    memset(g_hist_valid, 0, sizeof(g_hist_valid));
+}
 
 static uint32_t now_ms(void)
 {
@@ -2286,9 +2320,7 @@ static void demo_reset(void)
     g_demo_fuel = 78.0f;
     obd_store_init(&g_store);
     boost_init(&g_boost, PROFILE_BARO_FALLBACK_KPA);
-    g_hist_count = 0;
-    g_hist_pos = 0;
-    g_hist_last = 0;
+    hist_reset();
     /* Las marcas de validez tambien: sin esto, series_stats recorria las
      * 180 casillas y las casillas de MAX/MIN ensenaban los extremos de la
      * sesion anterior hasta que el anillo daba la vuelta. */
@@ -7124,8 +7156,19 @@ static void draw_tel_stat(int item, float x, float y, float w, float h)
         char minline[28];
         snprintf(minline, sizeof(minline), "%s %s", tr("MIN"),
                  tel_unit(item));
+        /* El valor va detras de la etiqueta medida: con x fija, "MIN rpm"
+         * (56 px) se comia el primer caracter del numero y "MIN lb/min"
+         * casi todo. Si etiqueta y valor no caben juntos en 88 px, la
+         * etiqueta se queda en "MIN" y la unidad se cae. */
+        float lw = (float)gfx_text_width(minline, 1);
+        float vw = (float)gfx_text_width(small, 1);
+        if (lw + 4.0f + vw > 76.0f) {
+            snprintf(minline, sizeof(minline), "%s", tr("MIN"));
+            lw = (float)gfx_text_width(minline, 1);
+        }
         gfx_text((int)x + 6, (int)y + h - 12, minline, QV_DIM, 1);
-        gfx_text((int)x + 52, (int)y + h - 12, small, QV_TEXT, 1);
+        gfx_text((int)(x + 6.0f + lw + 4.0f), (int)y + h - 12, small,
+                 QV_TEXT, 1);
     } else {
         gfx_text((int)x + 6, (int)y + 20, "N/D", QV_DIM, 2);
     }
@@ -8018,7 +8061,9 @@ static void run_probe(int sock)
     g_probe_mask[0] = probe_mask_block(sock, 0x00);
     if (obd_mask_supports(g_probe_mask[0], 0x20)) {
         g_probe_mask[1] = probe_mask_block(sock, 0x20);
-        if (obd_mask_supports(g_probe_mask[1], 0x40)) {
+        /* Dentro de su bloque el PID 0x40 es el 0x20: pasarle 0x40 hacia
+         * que la sonda no pidiera nunca el bloque 3. */
+        if (obd_mask_supports(g_probe_mask[1], 0x20)) {
             g_probe_mask[2] = probe_mask_block(sock, 0x40);
         }
     }
@@ -10009,9 +10054,7 @@ static void run_dashboard(Target *targets, int target_count)
     SceCtrlData pad;
     uint32_t start = now_ms();
 
-    g_hist_count = 0;
-    g_hist_pos = 0;
-    g_hist_last = 0;
+    hist_reset();
     /* Las marcas de validez tambien: sin esto, series_stats recorria las
      * 180 casillas y las casillas de MAX/MIN ensenaban los extremos de la
      * sesion anterior hasta que el anillo daba la vuelta. */
@@ -10140,9 +10183,7 @@ static void run_dashboard(Target *targets, int target_count)
                 consecutive_timeouts = 0;
                 consecutive_errors = 0;
                 g_elm_stuck = 0;
-                g_hist_count = 0;
-                g_hist_pos = 0;
-                g_hist_last = 0;
+                hist_reset();
             }
 
             last_status = now;
@@ -10412,9 +10453,7 @@ static void run_dashboard(Target *targets, int target_count)
                     g_elm_stuck = 0;
                     g_no_data_streak = 0;
                     last_rtt = -1;
-                    g_hist_count = 0;
-                    g_hist_pos = 0;
-                    g_hist_last = 0;
+                    hist_reset();
                     last_status = now;
                     log_file_printf("Auto-reintento OK\n");
                     log_sync();
