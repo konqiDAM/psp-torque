@@ -633,6 +633,16 @@ static const char *const g_widget_names[W_COUNT] = {
     "STFT", "LTFT", "AVANCE", "O2-1", "O2-2", "MIL", "BARO", "MARCHA"
 };
 
+/* Nombre visible de cada dato: pasa por tr() para que el dashboard siga el
+ * idioma como el resto de la interfaz. */
+static const char *widget_name(int item)
+{
+    if (item < 0 || item >= W_COUNT) {
+        return "";
+    }
+    return tr(g_widget_names[item]);
+}
+
 static const char *const g_style_names[STYLE_COUNT] = {
     "RELOJ", "BARRA", "TEXTO", "OCULTO"
 };
@@ -886,6 +896,24 @@ static const char *tr(const char *key)
         { "K-line: pendiente", "K-line: pending" },
         { "ACTUAL", "CURRENT" },
         { "PANTALLA INICIAL", "START SCREEN" },
+        { "VELOCIDAD", "SPEED" },
+        { "MARIPOSA", "THROTTLE" },
+        { "ACELERADOR", "ACCELERATOR" },
+        { "CARGA", "LOAD" },
+        { "ACEITE", "OIL" },
+        { "COMBUSTIBLE", "FUEL" },
+        { "AVANCE", "TIMING" },
+        { "MARCHA", "GEAR" },
+        { "TACOMETRO", "TACHO" },
+        { "TELEMETRIA", "TELEMETRY" },
+        { "Sin datos del motor.", "No engine data." },
+        { "Sin datos avanzados soportados.", "No advanced data supported." },
+        { "Comprueba el contacto y la conexion.", "Check the ignition and the connection." },
+        { "X: ELEGIR SERIES", "X: CHOOSE SERIES" },
+        { "EDITAR VISTA", "EDIT LAYOUT" },
+        { "SERIES DE TELEMETRIA", "TELEMETRY SERIES" },
+        { "SONDA DEL COCHE", "CAR PROBE" },
+        { "PULSA X PARA SONDEAR EL COCHE.", "PRESS X TO PROBE THE CAR." },
         { "ULTIMA", "LAST" },
         { "FALLOS", "FAULTS" },
         { "Codigos de averia", "Fault codes" },
@@ -5284,7 +5312,7 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms)
 static void draw_tacho(const dash_data *d, float x, float y, float w, float h)
 {
     qv_panel(x, y, w, h);
-    gfx_text((int)x + 10, (int)y + 7, "TACOMETRO", QV_DIM, 1);
+    gfx_text((int)x + 10, (int)y + 7, tr("TACOMETRO"), QV_DIM, 1);
 
     float cx = x + w * 0.5f;
     float cy = y + h * 0.5f + 7.0f;
@@ -5374,7 +5402,7 @@ static void draw_tacho(const dash_data *d, float x, float y, float w, float h)
 static void draw_speed(const dash_data *d, float x, float y, float w, float h)
 {
     qv_panel(x, y, w, h);
-    gfx_text((int)x + 10, (int)y + 7, "VELOCIDAD", QV_DIM, 1);
+    gfx_text((int)x + 10, (int)y + 7, tr("VELOCIDAD"), QV_DIM, 1);
 
     if (d->speed_valid) {
         gfx_text((int)x + 10, (int)y + 22, d->speed, QV_TEXT, 5);
@@ -5599,7 +5627,7 @@ static const char *o2_state_str(float v)
 static void widget_view_fill(const dash_data *d, int item, widget_view *wv)
 {
     memset(wv, 0, sizeof(*wv));
-    wv->label = (item >= 0 && item < W_COUNT) ? g_widget_names[item] : "";
+    wv->label = widget_name(item);
     wv->unit = "";
     wv->color = QV_TEXT;
     wv->fill = QV_GREEN;
@@ -6072,7 +6100,7 @@ static void draw_engine(const dash_data *d)
     n = m;
 
     if (n == 0) {
-        gfx_text(16, 64, "Sin datos del motor.", QV_DIM, 1);
+        gfx_text(16, 64, tr("Sin datos del motor."), QV_DIM, 1);
         return;
     }
 
@@ -6146,8 +6174,8 @@ static void draw_motor(const dash_data *d)
     }
 
     if (n == 0) {
-        gfx_text(16, 64, "Sin datos avanzados soportados.", QV_DIM, 1);
-        gfx_text(16, 84, "Comprueba el contacto y la conexion.", QV_DIM, 1);
+        gfx_text(16, 64, tr("Sin datos avanzados soportados."), QV_DIM, 1);
+        gfx_text(16, 84, tr("Comprueba el contacto y la conexion."), QV_DIM, 1);
         return;
     }
 
@@ -6395,7 +6423,7 @@ static const char *tel_name(int item)
     case W_SPEED: return "VELOCIDAD";
     case W_THR:   return "ACELERADOR";
     default:
-        return (item >= 0 && item < W_COUNT) ? g_widget_names[item] : "";
+        return widget_name(item);
     }
 }
 
@@ -6410,7 +6438,7 @@ static const char *tel_short(int item)
     case W_FUEL:     return "COMB";
     case W_TIMING:   return "AVZ";
     default:
-        return (item >= 0 && item < W_COUNT) ? g_widget_names[item] : "";
+        return widget_name(item);
     }
 }
 
@@ -6526,8 +6554,8 @@ static void draw_telemetry(void)
     float ph = 158.0f;
 
     qv_panel(px, py, pw, ph);
-    gfx_text((int)px + 10, (int)py + 8, "TELEMETRIA", QV_DIM, 1);
-    gfx_text((int)px + 96, (int)py + 8, "X: ELEGIR SERIES", QV_DIM, 1);
+    gfx_text((int)px + 10, (int)py + 8, tr("TELEMETRIA"), QV_DIM, 1);
+    gfx_text((int)px + 96, (int)py + 8, tr("X: ELEGIR SERIES"), QV_DIM, 1);
 
     /* Leyenda: solo las series que el usuario haya activado. */
     for (int i = 0; i < TEL_SLOTS; i++) {
@@ -6723,7 +6751,7 @@ static void draw_edit_overlay(void)
     gfx_rect(x, y, w, h, QV_PANEL2);
     gfx_border(x, y, w, h, 2.0f, theme_is_game() ? theme_accent() : QV_RED);
 
-    gfx_text((int)x + 16, (int)y + 8, "EDITAR VISTA", QV_TEXT, 2);
+    gfx_text((int)x + 16, (int)y + 8, tr("EDITAR VISTA"), QV_TEXT, 2);
     gfx_rect(x + 16.0f, y + 30.0f, w - 32.0f, 1.0f, QV_TRACK);
 
     char line[48];
@@ -6738,7 +6766,7 @@ static void draw_edit_overlay(void)
         }
 
         snprintf(line, sizeof(line), "%d  %s", i + 1,
-                 g_widget_names[g_slot_item[i]]);
+                 widget_name(g_slot_item[i]));
         gfx_text((int)x + 20, (int)ry, line,
                  selected ? QV_TEXT : QV_DIM, 1);
 
@@ -6774,7 +6802,7 @@ static void draw_tel_edit_overlay(void)
     gfx_rect(x, y, w, h, QV_PANEL2);
     gfx_border(x, y, w, h, 2.0f, theme_is_game() ? theme_accent() : QV_RED);
 
-    gfx_text((int)x + 16, (int)y + 8, "SERIES DE TELEMETRIA", QV_TEXT, 2);
+    gfx_text((int)x + 16, (int)y + 8, tr("SERIES DE TELEMETRIA"), QV_TEXT, 2);
     gfx_rect(x + 16.0f, y + 30.0f, w - 32.0f, 1.0f, QV_TRACK);
 
     char line[40];
@@ -7431,10 +7459,10 @@ static void draw_probe(void)
         g_probe_scroll = 0;
     }
 
-    gfx_text(8, 32, "SONDA DEL COCHE", QV_TEXT, 1);
+    gfx_text(8, 32, tr("SONDA DEL COCHE"), QV_TEXT, 1);
 
     if (g_probe_state == PROBE_IDLE) {
-        gfx_text(8, 56, "PULSA X PARA SONDEAR EL COCHE.", QV_TEXT, 1);
+        gfx_text(8, 56, tr("PULSA X PARA SONDEAR EL COCHE."), QV_TEXT, 1);
         gfx_text(8, 72, "Solo lectura: modo 01 y modo 09.", QV_DIM, 1);
         gfx_text(8, 88, "El resultado completo queda en el log.", QV_DIM, 1);
         return;
