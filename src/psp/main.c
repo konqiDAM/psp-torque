@@ -149,6 +149,8 @@ static char g_vehicle_name[24] = "";
 /* Estado de FALLOS: la barra mira la lampara, asi que esto vive arriba. */
 static int g_dtc_mil = -1;        /* -1 = no se ha leido */
 static int g_dtc_state = 0;       /* 0 sin leer, 1 leyendo, 2 leido */
+static int g_dtc_count = -1;
+static int g_ff_valid = 0;        /* la foto del fallo existe y se leyo */
 static char g_vbat[24] = "?";
 static char g_ssid[32] = "";
 static char g_ip[24] = "";
@@ -675,6 +677,7 @@ static int g_tel_item[TEL_SLOTS] = {
  * vista a mano manda la suya y el coche no opina. */
 static int g_vehicle_centre = OBD_CENTRE_BOOST;
 static int g_layout_user = 0;        /* 1 = el usuario ha tocado la vista */
+static int g_layout_dirty = 0;       /* 1 = la ha tocado EN ESTA sesion */
 
 /* FASE U3: preferencias v2.
  *
@@ -707,6 +710,10 @@ static int g_car_prefs_count = 0;
 static int g_global_slot_item[DASH_SLOTS];
 static int g_global_slot_style[DASH_SLOTS];
 static int g_global_tel_item[TEL_SLOTS];
+
+/* La escala de fabrica sin coche: la que se escribe en la clave global
+ * y a la que se vuelve al cambiar de coche. */
+static int g_global_rpm_max = 7000;
 
 static int slot_item_eff(int i)
 {
@@ -818,10 +825,26 @@ static void layout_apply_for_car(void)
     memcpy(g_slot_style, g_global_slot_style, sizeof(g_slot_style));
     memcpy(g_tel_item, g_global_tel_item, sizeof(g_tel_item));
 
+    /* Primero la escala global; luego, si este coche tiene la suya, manda
+     * la suya y el perfil se aparta: el usuario la ajusto a mano. */
+    g_cfg.rpm_max = g_global_rpm_max;
+
     vehicle_prefs *p = car_prefs_for(g_vehicle_id, 0);
-    if (p != NULL && p->has_tacho && p->rpm_max >= 4000) {
-        g_cfg.rpm_max = p->rpm_max;
+    if (p != NULL && p->has_tacho) {
+        int v = p->rpm_max;
+        if (v < 4000) {
+            v = 4000;
+        }
+        if (v > 9000) {
+            v = 9000;
+        }
+        g_cfg.rpm_max = v;
+        g_profile_tach = 0;
     }
+    if (g_cfg.shift_rpm > g_cfg.rpm_max) {
+        g_cfg.shift_rpm = g_cfg.rpm_max;
+    }
+
     if (p != NULL && p->has_layout) {
         memcpy(g_slot_item, p->slot_item, sizeof(g_slot_item));
         memcpy(g_slot_style, p->slot_style, sizeof(g_slot_style));
@@ -1395,9 +1418,6 @@ static void prefs_parse_key(const char *key, const char *val)
     } else if (strcmp(sk, "rpm_max") == 0) {
         vp->rpm_max = atoi(val);
         vp->has_tacho = 1;
-    } else if (strcmp(sk, "shift_rpm") == 0) {
-        vp->shift_rpm = atoi(val);
-        vp->has_tacho = 1;
     }
 }
 
@@ -1424,6 +1444,12 @@ static const char *hidden_names_join(void)
 static void prefs_capture(void)
 {
     if (g_vehicle_id[0] != '\0') {
+        /* Solo se guarda lo que el usuario ha ordenado en esta sesion: si
+         * no ha tocado nada, el coche sigue leyendo la vista global y esta
+         * sigue llegandole cuando cambie. */
+        if (!g_layout_dirty) {
+            return;
+        }
         vehicle_prefs *p = car_prefs_for(g_vehicle_id, 1);
         if (p != NULL) {
             memcpy(p->slot_item, g_slot_item, sizeof(g_slot_item));
@@ -1435,6 +1461,7 @@ static void prefs_capture(void)
         memcpy(g_global_slot_item, g_slot_item, sizeof(g_slot_item));
         memcpy(g_global_slot_style, g_slot_style, sizeof(g_slot_style));
         memcpy(g_global_tel_item, g_tel_item, sizeof(g_tel_item));
+        g_global_rpm_max = g_cfg.rpm_max;
     }
 }
 
@@ -1486,8 +1513,23 @@ static void settings_load(void)
         fd = sceIoOpen(LEGACY_SETTINGS_PATH, PSP_O_RDONLY, 0777);
     }
     if (fd >= 0) {
-        char buf[2048];
-        int n = sceIoRead(fd, buf, sizeof(buf) - 1);
+        /* El fichero lleva las claves globales y un bloque por coche: con
+         * dos coches pasa de 2 KB. Se lee entero, en un buffer estatico
+         * (no en la pila del hilo principal). */
+        static char buf[8192];
+        int n = 0;
+        for (;;) {
+            int chunk = sceIoRead(fd, buf + n, sizeof(buf) - 1 - n);
+            if (chunk <= 0) {
+                break;
+            }
+            n += chunk;
+            if (n >= (int)sizeof(buf) - 1) {
+                log_file_printf("Ajustes: fichero truncado a %d bytes\n",
+                                n);
+                break;
+            }
+        }
         sceIoClose(fd);
 
         if (n > 0) {
@@ -1708,7 +1750,7 @@ static void settings_save(void)
         return;
     }
 
-    char buf[2048];
+    static char buf[4096];
     int n = snprintf(buf, sizeof(buf),
                      "# PSP Torque - ajustes de tema\n"
                      "# theme: 0=QV ROSSO 1=VERDE 2=AMBAR "
@@ -1765,7 +1807,7 @@ static void settings_save(void)
                      "hidden=%s\n",
                      g_cfg.theme, g_cfg.color, g_cfg.lang, g_cfg.contrast, g_cfg.anim,
                      g_cfg.fast, g_cfg.peak_hold,
-                     g_cfg.smooth, g_cfg.shift_rpm, g_cfg.rpm_max,
+                     g_cfg.smooth, g_cfg.shift_rpm, g_global_rpm_max,
                      g_cfg.units, g_cfg.boost_auto,
                      g_cfg.boost_peak, g_cfg.boost_max,
                      g_global_slot_item[0], g_global_slot_style[0],
@@ -3395,6 +3437,12 @@ static int connect_network_and_elm(Target *targets, int *target_count,
     g_mask2 = 0;
     g_mask3 = 0;
     g_vehicle_seen = 0;
+    /* Codigos de la sesion anterior: la lampara del coche que acaba de
+     * irse no puede quedarse encendida en la barra del siguiente. */
+    g_dtc_mil = -1;
+    g_dtc_state = 0;
+    g_dtc_count = -1;
+    g_ff_valid = 0;
     g_thr_pid = 0x11;
     g_thr_label = "MARIPOSA";
     g_oil_supported = 0;
@@ -5405,7 +5453,7 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms)
 
     /* Lampara de averia: si se han leido los codigos y esta encendida se ve
      * aqui, sin tener que entrar en FALLOS. Un N/D no es un aviso. */
-    if (g_dtc_mil == 1) {
+    if (g_dtc_mil == 1 && !g_log_broken) {
         gfx_text(right_x - 8 - gfx_text_width("MIL", 1) - 10, 8, "MIL",
                  QV_CRIT, 1);
     }
@@ -7707,12 +7755,10 @@ static obd_dtc g_dtc_permanent[DTC_MAX];
 static int g_dtc_stored_n = 0;
 static int g_dtc_pending_n = 0;
 static int g_dtc_permanent_n = 0;
-static int g_dtc_count = -1;
 
 /* Modo 02: la foto que guarda la centralita cuando salta el fallo. Solo
  * se pide si hay codigos guardados; un coche sin codigos no tiene foto y
  * no se gastan peticiones en preguntar. */
-static int g_ff_valid = 0;
 static int g_ff_rpm = -1;
 static int g_ff_speed = -1;
 static int g_ff_ect = -1;
@@ -7817,41 +7863,57 @@ static void run_fallos(int sock)
     g_ff_ect = -1;
     g_ff_load = -1;
     if (g_dtc_stored_n > 0) {
+        /* La respuesta del modo 02 lleva el numero de fotograma delante de
+         * los datos: "42 PID FR D...". Con cabeceras apagadas y sin relleno
+         * llegan cinco bytes; con relleno CAN llegan ocho. Se mira la
+         * longitud para no comerse el fotograma como si fuera un dato. */
         n = dtc_read_hex(sock, "0200", buf, (int)sizeof(buf), &reply);
-        if (n >= 6 && buf[0] == 0x42 && buf[1] == 0x00) {
-            uint32_t ff_mask = obd_disc_mask(&buf[2], n - 2);
+        const int ff_len = n;
+        if (n >= 7 && buf[0] == 0x42 && buf[1] == 0x00) {
+            uint32_t ff_mask = obd_disc_mask(&buf[3], n - 3);
             g_ff_valid = 1;
 
             /* Los cuatro valores que cuentan la historia del fallo, cada
              * uno con su decodificacion de la norma (J1979). */
+            /* Primer byte de datos del fotograma: 3 si vino el numero de
+             * fotograma (lo normal), 2 si el clon se lo salto. */
+            int ff_off = (n >= 7) ? 3 : 2;
+
             if (obd_mask_supports(ff_mask, 0x0C)) {
                 n = dtc_read_hex(sock, "020C00", buf, (int)sizeof(buf),
                                  &reply);
-                if (n >= 6 && buf[0] == 0x42 && buf[1] == 0x0C) {
-                    g_ff_rpm = ((buf[2] << 8) | buf[3]) / 4;
+                ff_off = (n >= 6) ? 3 : 2;
+                if (n > ff_off + 1 && buf[0] == 0x42 && buf[1] == 0x0C) {
+                    g_ff_rpm = ((buf[ff_off] << 8) | buf[ff_off + 1]) / 4;
                 }
             }
             if (obd_mask_supports(ff_mask, 0x0D)) {
                 n = dtc_read_hex(sock, "020D00", buf, (int)sizeof(buf),
                                  &reply);
-                if (n >= 5 && buf[0] == 0x42 && buf[1] == 0x0D) {
-                    g_ff_speed = buf[2];
+                ff_off = (n >= 5) ? 3 : 2;
+                if (n > ff_off && buf[0] == 0x42 && buf[1] == 0x0D) {
+                    g_ff_speed = buf[ff_off];
                 }
             }
             if (obd_mask_supports(ff_mask, 0x05)) {
                 n = dtc_read_hex(sock, "020500", buf, (int)sizeof(buf),
                                  &reply);
-                if (n >= 5 && buf[0] == 0x42 && buf[1] == 0x05) {
-                    g_ff_ect = (int)buf[2] - 40;
+                ff_off = (n >= 5) ? 3 : 2;
+                if (n > ff_off && buf[0] == 0x42 && buf[1] == 0x05) {
+                    g_ff_ect = (int)buf[ff_off] - 40;
                 }
             }
             if (obd_mask_supports(ff_mask, 0x04)) {
                 n = dtc_read_hex(sock, "020400", buf, (int)sizeof(buf),
                                  &reply);
-                if (n >= 5 && buf[0] == 0x42 && buf[1] == 0x04) {
-                    g_ff_load = (int)buf[2] * 100 / 255;
+                ff_off = (n >= 5) ? 3 : 2;
+                if (n > ff_off && buf[0] == 0x42 && buf[1] == 0x04) {
+                    g_ff_load = (int)buf[ff_off] * 100 / 255;
                 }
             }
+            /* Una linea con lo que contesto de verdad: la forma del modo 02
+             * cambia entre adaptadores y sin esto no hay como comprobarlo. */
+            log_file_printf("Congelado: 0200 -> %d bytes\n", ff_len);
             log_file_printf("Congelado: rpm=%d spd=%d ect=%d load=%d\n",
                             g_ff_rpm, g_ff_speed, g_ff_ect, g_ff_load);
         }
@@ -8935,6 +8997,7 @@ static int handle_mode_input(unsigned int pressed)
             g_dtc_permanent_n = 0;
             g_dtc_mil = -1;
             g_dtc_count = -1;
+            g_ff_valid = 0;
             changed = 1;
         }
     }
@@ -9135,7 +9198,14 @@ static int handle_settings_input(unsigned int pressed)
             if (g_vehicle_id[0] != '\0') {
                 vehicle_prefs *vp = car_prefs_for(g_vehicle_id, 1);
                 if (vp != NULL) {
-                    vp->rpm_max = g_cfg.rpm_max;
+                    int v = g_cfg.rpm_max;
+                    if (v < 4000) {
+                        v = 4000;
+                    }
+                    if (v > 9000) {
+                        v = 9000;
+                    }
+                    vp->rpm_max = v;
                     vp->has_tacho = 1;
                 }
             }
@@ -9213,11 +9283,15 @@ static int handle_edit_input(unsigned int pressed)
     if (pressed & PSP_CTRL_TRIANGLE) {
         g_slot_item[g_edit_sel] = widget_cycle(g_slot_item[g_edit_sel], 1, 0);
         g_layout_user = 1;
+        g_layout_dirty = 1;
+        g_layout_dirty = 1;
         changed = 1;
     }
     if (pressed & PSP_CTRL_SQUARE) {
         g_slot_item[g_edit_sel] = widget_cycle(g_slot_item[g_edit_sel], -1, 0);
         g_layout_user = 1;
+        g_layout_dirty = 1;
+        g_layout_dirty = 1;
         changed = 1;
     }
 
@@ -9253,12 +9327,14 @@ static int handle_tel_edit_input(unsigned int pressed)
         g_tel_item[g_tel_edit_sel] =
             tel_cycle_step(g_tel_item[g_tel_edit_sel], 1);
         g_layout_user = 1;
+        g_layout_dirty = 1;
         changed = 1;
     }
     if (pressed & PSP_CTRL_LEFT) {
         g_tel_item[g_tel_edit_sel] =
             tel_cycle_step(g_tel_item[g_tel_edit_sel], -1);
         g_layout_user = 1;
+        g_layout_dirty = 1;
         changed = 1;
     }
 
