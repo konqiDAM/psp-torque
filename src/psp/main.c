@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.51 2026-11-18 salida limpia con START mantenido, indicador escalado al enlace"
+#define BUILD_TAG "fase2.52 2026-11-18 SALIR visible en ajustes, salida con START mantenido, indicador escalado al enlace"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -6891,7 +6891,12 @@ static void draw_settings_overlay(void)
     const float w = 464.0f;
     const float h = 238.0f;
     const int items = SET_COUNT;
-    const int per_col = 9;
+    /* Diez filas por columna, no nueve: con nueve, SALIR (la fila 18) caia
+     * en una tercera columna que empieza en x=472 sobre una pantalla de 480
+     * y un panel que acaba justo ahi, asi que existia en la lista y no se
+     * veia nunca. Se llega a ella con ARRIBA desde la primera fila o
+     * bajando, y ahora esta a la vista. */
+    const int per_col = 10;
     const float colw = 218.0f;
 
     /* Sombra y panel. */
@@ -6907,7 +6912,7 @@ static void draw_settings_overlay(void)
         int col = i / per_col;
         int row = i % per_col;
         float cx = x + 12.0f + (float)col * (colw + 8.0f);
-        float ry = y + 42.0f + (float)row * 19.0f;
+        float ry = y + 42.0f + (float)row * 18.0f;
         int selected = (g_settings_sel == i);
 
         if (selected) {
@@ -7013,9 +7018,9 @@ static void draw_settings_overlay(void)
                        value_color, 1);
     }
 
-    gfx_text((int)x + 16, (int)(y + h) - 28,
+    gfx_text((int)x + 16, (int)(y + h) - 20,
              "ARRIBA/ABAJO: ELEGIR   IZQ/DER: CAMBIAR", QV_DIM, 1);
-    gfx_text((int)x + 16, (int)(y + h) - 16,
+    gfx_text((int)x + 16, (int)(y + h) - 10,
              tr("X: GUARDAR   START: CERRAR   MANTENER START: SALIR"),
              QV_DIM, 1);
 }
