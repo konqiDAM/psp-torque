@@ -36,10 +36,13 @@ float obd_smooth_apply(obd_smooth *s, float v, uint32_t ts);
 
 /* Paso de presentacion: mueve el valor mostrado hacia `target` con la
  * constante de tiempo `tau_ms`, usando el tiempo transcurrido desde la
- * llamada anterior. Se llama una vez por fotograma, no por muestra, que
- * es lo que convierte un escalon cada cuatro segundos en una aguja que
- * se mueve. Con dt = 0 (varias lecturas del mismo valor en el mismo
- * fotograma) no cambia nada. */
+ * llamada anterior, que es lo que convierte un escalon cada varios
+ * segundos en una aguja que se mueve.
+ *
+ * Con dt = 0 (varias lecturas del mismo valor en el mismo fotograma) no
+ * cambia nada, asi que se puede llamar desde el camino de lectura sin
+ * llevar la cuenta de cuantas veces se lee cada valor por fotograma.
+ * tau_ms = 0 congela el valor donde este. */
 float obd_smooth_step(obd_smooth *s, float target, uint32_t now,
                       uint32_t tau_ms);
 

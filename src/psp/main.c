@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.54 2026-11-18 revision: salida en pantallas con bucle, fila del congelado, identidad al conectar"
+#define BUILD_TAG "fase2.55 2026-11-18 interpolacion de presentacion, plan estable, log crudo"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -2084,7 +2084,9 @@ static uint32_t disp_tau_ms(uint8_t pid)
     return t;
 }
 
-static int sample_value(uint8_t pid, uint32_t now, float *out)
+/* Lectura exacta, sin suavizado: la medida tal cual llego. Es la que va
+ * al log y a los maximos, que son registro y no presentacion. */
+static int sample_value_raw(uint8_t pid, uint32_t now, float *out)
 {
     const obd_sample *sample = obd_store_get(&g_store, pid);
     if (sample == NULL || !sample->valid) {
@@ -2093,12 +2095,22 @@ static int sample_value(uint8_t pid, uint32_t now, float *out)
     if ((uint32_t)(now - sample->ts_ms) > sample_valid_ms(pid)) {
         return 0;
     }
+    *out = sample->value;
+    return 1;
+}
+
+/* Lectura para pintar: el valor se mueve hacia la muestra en cada
+ * fotograma, asi que la aguja no salta ni se queda quieta entre dos
+ * datos. La antiguedad y el N/D se siguen midiendo en sample_value_raw. */
+static int sample_value(uint8_t pid, uint32_t now, float *out)
+{
+    if (!sample_value_raw(pid, now, out)) {
+        return 0;
+    }
     if (!g_cfg.smooth) {
-        *out = sample->value;
         return 1;
     }
-    *out = obd_smooth_step(&g_disp[pid], sample->value, now,
-                           disp_tau_ms(pid));
+    *out = obd_smooth_step(&g_disp[pid], *out, now, disp_tau_ms(pid));
     return 1;
 }
 
@@ -9133,7 +9145,7 @@ static void draw_screen(uint32_t now, int requests, int data_count,
             g_peak_boost = d.boost_val;
         }
         float sp;
-        if (sample_value(0x0D, now, &sp) && sp > g_peak_speed) {
+        if (sample_value_raw(0x0D, now, &sp) && sp > g_peak_speed) {
             g_peak_speed = sp;
         }
     }
@@ -10244,12 +10256,12 @@ static void run_dashboard(Target *targets, int target_count)
             char iat[16] = "N/D";
             char spd[16] = "N/D";
 
-            if (sample_value(0x0C, now, &f)) fmt_0(rpm, sizeof(rpm), f);
-            if (sample_value(0x0B, now, &f)) fmt_0(map, sizeof(map), f);
+            if (sample_value_raw(0x0C, now, &f)) fmt_0(rpm, sizeof(rpm), f);
+            if (sample_value_raw(0x0B, now, &f)) fmt_0(map, sizeof(map), f);
             if (g_boost.boost_valid) fmt_1(boost, sizeof(boost), g_boost.boost_bar);
-            if (sample_value(0x05, now, &f)) fmt_0(ect, sizeof(ect), f);
-            if (sample_value(0x0F, now, &f)) fmt_0(iat, sizeof(iat), f);
-            if (sample_value(0x0D, now, &f)) fmt_0(spd, sizeof(spd), f);
+            if (sample_value_raw(0x05, now, &f)) fmt_0(ect, sizeof(ect), f);
+            if (sample_value_raw(0x0F, now, &f)) fmt_0(iat, sizeof(iat), f);
+            if (sample_value_raw(0x0D, now, &f)) fmt_0(spd, sizeof(spd), f);
 
             log_file_printf("t=%u rpm=%s map=%s boost=%s ect=%s iat=%s "
                             "spd=%s rtt=%d gap=%d gapcfg=%d ok=%d nd=%d "

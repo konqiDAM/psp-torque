@@ -131,6 +131,47 @@ static void test_paso_de_presentacion(void)
     CHECK_NEAR(a, b, 0.0001);
 }
 
+/* Los invariantes de los que depende el panel: el envolvente no se pasa,
+ * el desbordamiento del reloj no rompe nada, un reset vuelve a enganchar
+ * el valor exacto y tau 0 congela en vez de saltar. */
+static void test_invariantes(void)
+{
+    obd_smooth s;
+    obd_smooth_reset(&s);
+
+    /* Sin sobrepasar el envolvente, aunque el objetivo salte de un extremo
+     * al otro: es lo que garantiza que una aguja no se pase del maximo. */
+    obd_smooth_step(&s, 0.0f, 1000u, 300u);
+    float lo = 0.0f;
+    float hi = 100.0f;
+    uint32_t t = 1000u;
+    for (int i = 0; i < 600; i++) {
+        t += 16u;
+        float target = (i % 2) ? hi : lo;
+        float v = obd_smooth_step(&s, target, t, 300u);
+        CHECK(v >= lo - 0.001f);
+        CHECK(v <= hi + 0.001f);
+    }
+
+    /* Desbordamiento del contador de milisegundos: la resta es uint32, no
+     * un desbordamiento con signo. */
+    obd_smooth_reset(&s);
+    obd_smooth_step(&s, 100.0f, 0xFFFFFFF0u, 300u);
+    float v = obd_smooth_step(&s, 200.0f, 0x30u, 300u);
+    CHECK(v > 100.0f);
+    CHECK(v < 200.0f);
+
+    /* Tras un reset, la siguiente lectura es la medida, no una mezcla:
+     * asi el baro de key-on y los cambios de ajuste no se contaminan. */
+    obd_smooth_reset(&s);
+    CHECK_NEAR(obd_smooth_step(&s, 77.0f, 5000u, 800u), 77.0, 0.001);
+
+    /* tau 0 congela: no inventa un salto. */
+    obd_smooth_reset(&s);
+    obd_smooth_step(&s, 10.0f, 1000u, 300u);
+    CHECK_NEAR(obd_smooth_step(&s, 90.0f, 1016u, 0u), 10.0, 0.001);
+}
+
 void test_smooth(void)
 {
     test_alpha_tau();
@@ -140,4 +181,5 @@ void test_smooth(void)
     test_retraso_independiente_de_la_cadencia();
     test_salto_grande();
     test_paso_de_presentacion();
+    test_invariantes();
 }
