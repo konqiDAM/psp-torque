@@ -481,11 +481,12 @@ typedef struct {
     int chime_gap;  /* fijo 9 decimas = 0,90 s; sin ajuste */
     int show_fps;   /* 1 = mostrar FPS en pantalla */
     int debug;      /* 1 = panel de diagnostico de rendimiento */
+    int log_full;   /* 1 = registrar cada peticion y cada respuesta */
     char profile[24]; /* perfil forzado (vehicle.h); vacio = autodetectar */
 } app_settings;
 
 static app_settings g_cfg = { 0, 0, 0, 1, 1, 0, 1, 0,
-                              4000, 7000, 0, 1, 0, 15, 100, 9, 1, 0, "" };
+                              4000, 7000, 0, 1, 0, 15, 100, 9, 1, 0, 1, "" };
 
 /* FASE F1: hueco minimo entre el fin de una respuesta y el envio del
  * siguiente comando al ELM327. Medido: con 0 ms el clon retrasa su
@@ -949,6 +950,7 @@ static const char *tr(const char *key)
         { "ULTIMA", "LAST" },
         { "FALLOS", "FAULTS" },
         { "CONGELADO", "FREEZE FRAME" },
+        { "LOG COMPLETO", "FULL LOG" },
         { "Codigos de averia", "Fault codes" },
         { "GUARDADOS", "STORED" },
         { "PENDIENTES", "PENDING" },
@@ -971,8 +973,8 @@ static const char *tr(const char *key)
     return key;
 }
 
-#define SET_COUNT 18
-#define SET_EXIT  17
+#define SET_COUNT 19
+#define SET_EXIT  18
 
 static int g_settings_open = 0;
 static int g_settings_sel = 0;
@@ -1624,6 +1626,9 @@ static void settings_load(void)
                     }
                 } else if (strcmp(key, "debug") == 0) {
                     g_cfg.debug = atoi(val) ? 1 : 0;
+                } else if (strcmp(key, "log_full") == 0 ||
+                           strcmp(key, "log_completo") == 0) {
+                    g_cfg.log_full = atoi(val) ? 1 : 0;
                 } else if (strcmp(key, "elm_gap") == 0 ||
                            strcmp(key, "hueco_elm") == 0) {
                     int v = atoi(val);
@@ -1699,6 +1704,7 @@ static void settings_load(void)
     }
     g_cfg.show_fps = g_cfg.show_fps ? 1 : 0;
     g_cfg.debug = g_cfg.debug ? 1 : 0;
+    g_cfg.log_full = g_cfg.log_full ? 1 : 0;
 
     /* El aviso INITIAL D es fijo... */
     g_cfg.chime_kmh = 100;
@@ -1799,6 +1805,7 @@ static void settings_save(void)
                      "tel4_item=%d\n"
                      "fps_show=%d\n"
                      "debug=%d\n"
+                     "log_full=%d\n"
                      "elm_gap=%d\n"
                      "last=%d\n"
                      "profile=%s\n"
@@ -1819,7 +1826,8 @@ static void settings_save(void)
                      g_global_tel_item[0], g_global_tel_item[1],
                      g_global_tel_item[2], g_global_tel_item[3],
                      g_global_tel_item[4],
-                     g_cfg.show_fps, g_cfg.debug, g_elm_min_gap_ms, g_mode,
+                     g_cfg.show_fps, g_cfg.debug, g_cfg.log_full,
+                     g_elm_min_gap_ms, g_mode,
                      g_cfg.profile,
                      g_start_mode >= 0 ? mode_key(g_start_mode) : "last",
                      hidden_names_join());
@@ -2971,6 +2979,18 @@ static void elm_send_and_read(int sock, const char *cmd, int wait_ms,
     }
 
     *reply = rx.reply;
+
+    /* FASE K1b: con el registro completo activado se apunta cada peticion y
+     * cada respuesta. Es lo que permite reconstruir una sesion sin adivinar
+     * (y lo que pidio ivan para poder mandar el log entero). */
+    if (g_cfg.log_full) {
+        const char *st = reply->data ? "OK"
+                        : (reply->no_data ? "NO DATA"
+                        : (reply->error ? "ERROR"
+                        : (reply->searching ? "BUSCANDO"
+                        : (reply->stopped ? "STOPPED" : "?"))));
+        log_file_printf("> %s  <%s %s\n", cmd, st, reply->text);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -6874,6 +6894,10 @@ static void draw_settings_overlay(void)
             label = "DEBUG";
             snprintf(value, sizeof(value), "%s",
                      g_cfg.debug ? "SI" : "NO");
+        } else if (i == 17) {
+            label = tr("LOG COMPLETO");
+            snprintf(value, sizeof(value), "%s",
+                     g_cfg.log_full ? "SI" : "NO");
         } else {
             label = tr("SALIR");
             snprintf(value, sizeof(value), "CERRAR APP");
@@ -9242,6 +9266,8 @@ static int handle_settings_input(unsigned int pressed)
             }
         } else if (g_settings_sel == 16) {
             g_cfg.debug = !g_cfg.debug;
+        } else if (g_settings_sel == 17) {
+            g_cfg.log_full = !g_cfg.log_full;
         }
 
         settings_apply();
@@ -10028,6 +10054,25 @@ static void run_dashboard(Target *targets, int target_count)
 
     log_file_printf("Fin de sesion: peticiones=%d datos=%d nd=%d to=%d\n",
                     requests, data_count, no_data_count, timeouts);
+
+    /* Resumen de una tacada: es lo unico que hay que leer del log para saber
+     * como fue la sesion, sin buscar entre cientos de lineas. */
+    log_file_printf("=== RESUMEN ===\n");
+    log_file_printf("Vehiculo: %s%s%s tacometro=%d rojo=%d corte=%d\n",
+                    g_vehicle_name[0] ? g_vehicle_name : "sin perfil",
+                    g_cfg.profile[0] ? " (forzado " : "",
+                    g_cfg.profile[0] ? ")" : "",
+                    (int)tach_max_rpm(), (int)redline_rpm(), g_profile_cut);
+    log_file_printf("Enlace: %.2f req/s medidas, plan %.2f req/s (%s)\n",
+                    g_link_measured, g_link_plan.budget,
+                    g_link_plan.compressed ? "comprimido" : "holgado");
+    log_file_printf("FALLOS: lampara=%d guardados=%d pendientes=%d "
+                    "permanentes=%d\n",
+                    g_dtc_mil, g_dtc_stored_n, g_dtc_pending_n,
+                    g_dtc_permanent_n);
+    log_file_printf("Sesion: %u s, reconexiones=%d, caidas=%d\n",
+                    (unsigned)((now_ms() - g_session_start_ms) / 1000u),
+                    reconnects, link_losses);
     log_sync();
 }
 
