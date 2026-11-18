@@ -53,10 +53,14 @@ float obd_ramp_step(obd_ramp *r, float target, uint32_t sample_ts,
         r->t0 = now;
         r->span_ms = span_ms;
         r->sample_ts = sample_ts;
-    } else if (r->to != target) {
+    } else if (r->to != target || r->span_ms != span_ms) {
+        /* Mismo instante de muestra pero otro objetivo o otro tramo: no
+         * deberia pasar, pero si pasa se rehace el tramo desde la aguja en
+         * vez de dejar el estado a medias. */
         r->from = r->cur;
         r->to = target;
         r->t0 = now;
+        r->span_ms = span_ms;
     }
 
     if (r->span_ms == 0u) {

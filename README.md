@@ -123,7 +123,7 @@ pedir el `EBOOT` de la última sesión.
 | `L` / `R` / `◀` / `▶` | Cambiar de pantalla de conducción (GENERAL, MOTOR, DIAG, TELEM) |
 | `SELECT` | Abrir / cerrar el selector de pantallas |
 | `START` | Abrir / cerrar el menú de ajustes |
-| `START` (mantener 1,2 s) | Salir de la aplicación; también desde el sniffer y desde FALLOS, que corren su propio bucle. Un escaneo en curso se cancela con `CIRCLE` |
+| `START` (mantener 1,2 s) | Salir de la aplicación desde cualquier pantalla, incluidas las que corren su propio bucle (sniffer, FALLOS, escaneo). Un escaneo en curso se cancela con `CIRCLE` |
 | `TRIANGLE` | Reconectar con el perfil WiFi guardado |
 | `SQUARE` | Abrir el diálogo WiFi de la PSP y reconectar |
 | `X` o `START` | Saltar la animación de arranque · confirmar · salir del modo demo |

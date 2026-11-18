@@ -2040,13 +2040,18 @@ static void disp_reset(void)
  * vuelve cada 7 s, recorre el escalon en 4 y espera el resto. */
 static uint32_t disp_span_ms(uint8_t pid)
 {
-    uint32_t p = 0;
+    uint32_t sched = 0;
     for (int i = 0; i < g_sched.count; i++) {
         if (g_sched.items[i].pid == pid) {
-            p = g_sched.items[i].period_ms;
+            sched = g_sched.items[i].period_ms;
             break;
         }
     }
+    /* El mayor de los dos: si un PID vuelve mas despacio de lo prometido, el
+     * tramo tiene que durar lo que tarda de verdad, y si vuelve mas rapido
+     * tampoco puede alargarse por encima del hueco real. */
+    uint32_t real = g_seen_iv_ms[pid];
+    uint32_t p = (real > sched) ? real : sched;
     if (p == 0u) {
         return 400u;
     }
@@ -2084,7 +2089,7 @@ static void seen_note(uint8_t pid, uint32_t ts)
  * 9 s, asi que el tope se cumplia entre muestra y muestra y el cuadro
  * parpadeaba a N/D un tercio del tiempo (medido en phase1_007: ect N/D en
  * 45 de 127 muestras, iat 57, velocidad 53). Una lectura vale hasta tres
- * de sus propios ciclos, con suelo de 6 s y techo de 20. */
+ * de sus propios ciclos, con suelo de 6 s y techo de 30. */
 static uint32_t sample_valid_ms(uint8_t pid)
 {
     uint32_t sched = 0;
@@ -2174,17 +2179,19 @@ static void boost_learn_update(uint32_t now)
     float rpm = 0.0f;
     int wot = 0;
 
-    if (sample_value(0x04, now, &load) && load >= 90.0f) {
+    /* La ventana de aprendizaje se decide con la medida exacta: con la
+     * rampa se abria hasta un segundo tarde. */
+    if (sample_value_raw(0x04, now, &load) && load >= 90.0f) {
         wot = 1;
     }
-    if (sample_value(0x11, now, &thr) && thr >= 90.0f) {
+    if (sample_value_raw(0x11, now, &thr) && thr >= 90.0f) {
         wot = 1;
     }
-    if (g_thr_pid != 0x11 && sample_value(g_thr_pid, now, &thr) &&
+    if (g_thr_pid != 0x11 && sample_value_raw(g_thr_pid, now, &thr) &&
         thr >= 90.0f) {
         wot = 1;
     }
-    if (!wot || !sample_value(0x0C, now, &rpm) || rpm < 3000.0f) {
+    if (!wot || !sample_value_raw(0x0C, now, &rpm) || rpm < 3000.0f) {
         return;
     }
 
@@ -4088,6 +4095,14 @@ static int scan_cancelled(void)
     SceCtrlData pad;
     memset(&pad, 0, sizeof(pad));
     sceCtrlReadBufferPositive(&pad, 1);
+
+    /* El escaneo y la sonda corren en su propio bucle, asi que sin esto el
+     * START mantenido no hacia nada durante los 30-60 s que duran: CIRCLE
+     * cancela y START mantenido sale de la app, como en el resto. */
+    exit_hold_tick(now_ms(), pad.Buttons);
+    if (g_exit_request) {
+        return 1;
+    }
     return (pad.Buttons & PSP_CTRL_CIRCLE) != 0;
 }
 
@@ -4725,11 +4740,13 @@ static void run_scan(int sock)
 typedef struct {
     char rpm[16];
     int rpm_valid;
-    float rpm_val;
+    float rpm_val;   /* con rampa: posicion de la aguja */
+    float rpm_raw;   /* medida exacta: avisos y umbrales */
 
     char speed[16];
     int speed_valid;
     float speed_val;
+    float speed_raw;
 
     char boost[24];
     int boost_valid;
@@ -5768,12 +5785,12 @@ static void draw_tacho(const dash_data *d, float x, float y, float w, float h)
     if (d->rpm_valid) {
         float ratio = clamp_float(d->rpm_val / tach_max_rpm(), 0.0f, 1.0f);
         uint32_t c = QV_TEXT;
-        if (d->rpm_val >= redline_rpm()) {
+        if (d->rpm_raw >= redline_rpm()) {
             c = QV_RED;
-        } else if (d->rpm_val >= redline_rpm() - 300.0f) {
+        } else if (d->rpm_raw >= redline_rpm() - 300.0f) {
             c = QV_AMBER;
         }
-        if (g_cfg.shift_rpm > 0 && d->rpm_val >= (float)g_cfg.shift_rpm) {
+        if (g_cfg.shift_rpm > 0 && d->rpm_raw >= (float)g_cfg.shift_rpm) {
             c = QV_RED;
         }
         theme_value(cx, cy, r, 135.0f + 270.0f * ratio, c, 6.0f);
@@ -5781,7 +5798,7 @@ static void draw_tacho(const dash_data *d, float x, float y, float w, float h)
         theme_hub(cx, cy, theme_accent());
         gfx_text_center((int)cx, (int)cy - 16, d->rpm, QV_TEXT, 3);
 
-        if (g_cfg.shift_rpm > 0 && d->rpm_val >= (float)g_cfg.shift_rpm) {
+        if (g_cfg.shift_rpm > 0 && d->rpm_raw >= (float)g_cfg.shift_rpm) {
             int sy = theme_is_game() ? 50 : 34;
             gfx_text_center((int)cx, (int)cy + sy, "SHIFT", QV_RED, 1);
         }
@@ -6085,13 +6102,13 @@ static void widget_view_fill(const dash_data *d, int item, widget_view *wv)
             snprintf(wv->value, sizeof(wv->value), "%s", d->rpm);
             wv->valid = 1;
             wv->ratio = clamp_float(d->rpm_val / tach_max_rpm(), 0.0f, 1.0f);
-            if (d->rpm_val >= redline_rpm()) {
+            if (d->rpm_raw >= redline_rpm()) {
                 wv->color = QV_RED;
-            } else if (d->rpm_val >= redline_rpm() - 300.0f) {
+            } else if (d->rpm_raw >= redline_rpm() - 300.0f) {
                 wv->color = QV_AMBER;
             }
             if (g_cfg.shift_rpm > 0 &&
-                d->rpm_val >= (float)g_cfg.shift_rpm) {
+                d->rpm_raw >= (float)g_cfg.shift_rpm) {
                 wv->color = QV_RED;
             }
         }
@@ -6106,7 +6123,11 @@ static void widget_view_fill(const dash_data *d, int item, widget_view *wv)
         const obd_vehicle_profile *vp = obd_vehicle_by_id(g_vehicle_id);
         int gear = 0;
         if (vp != NULL && d->rpm_valid && d->speed_valid) {
-            gear = obd_vehicle_gear(vp->gear_kmh, d->rpm_val, d->speed_val);
+            /* Con la medida exacta: la rampa retrasa rpm y velocidad
+             * distinto, y con aceleracion fuerte el cociente se sale del 10 %
+             * que obd_vehicle_gear deja pasar, asi que la marcha
+             * desaparecia justo al acelerar. */
+            gear = obd_vehicle_gear(vp->gear_kmh, d->rpm_raw, d->speed_raw);
         }
         if (gear > 0) {
             snprintf(wv->value, sizeof(wv->value), "%d", gear);
@@ -9025,9 +9046,11 @@ static void draw_screen(uint32_t now, int requests, int data_count,
     float value;
 
     if (sample_value(0x0C, now, &value)) {
+        float raw = 0.0f;
         fmt_0(d.rpm, sizeof(d.rpm), value);
         d.rpm_valid = 1;
         d.rpm_val = value;
+        d.rpm_raw = sample_value_raw(0x0C, now, &raw) ? raw : value;
     }
     if (sample_value(0x0B, now, &value)) {
         if (units_imperial()) {
@@ -9055,9 +9078,11 @@ static void draw_screen(uint32_t now, int requests, int data_count,
         d.iat_val = value;
     }
     if (sample_value(0x0D, now, &value)) {
+        float sraw = 0.0f;
         fmt_0(d.speed, sizeof(d.speed), units_speed_from_kmh(value));
         d.speed_valid = 1;
         d.speed_val = units_speed_from_kmh(value);
+        d.speed_raw = sample_value_raw(0x0D, now, &sraw) ? sraw : value;
     }
     if (sample_value(g_thr_pid, now, &value)) {
         fmt_0(d.thr, sizeof(d.thr), value);

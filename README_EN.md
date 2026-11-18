@@ -122,7 +122,7 @@ page describes. For what is documented here you need to build it (or ask for the
 | `L` / `R` / `◀` / `▶` | Change driving screen (GENERAL, MOTOR, DIAG, TELEM) |
 | `SELECT` | Open / close the screen picker |
 | `START` | Open / close the settings menu |
-| `START` (hold 1.2 s) | Quit, including from the sniffer and FALLOS, which run their own loop. A running scan is cancelled with `CIRCLE` |
+| `START` (hold 1.2 s) | Quit from any screen, including the ones that run their own loop (sniffer, FALLOS, scan). A running scan is cancelled with `CIRCLE` |
 | `TRIANGLE` | Reconnect using the saved WiFi profile |
 | `SQUARE` | Open the PSP WiFi dialog and reconnect |
 | `X` or `START` | Skip the boot animation · confirm · leave demo mode |

@@ -130,6 +130,32 @@ static void test_rampa(void)
     CHECK_NEAR(hold, 50.0, 0.001);
     CHECK_NEAR(obd_ramp_step(&r, 200.0f, 3u, 1500u, 1000u), 125.0, 0.001);
 
+    /* Mismo instante de muestra y otro objetivo: el tramo se rehace desde
+     * la aguja y adopta el tramo nuevo. */
+    obd_ramp_reset(&r);
+    obd_ramp_step(&r, 0.0f, 9u, 0u, 1000u);
+    CHECK_NEAR(obd_ramp_step(&r, 100.0f, 10u, 0u, 1000u), 0.0, 0.001);
+    CHECK_NEAR(obd_ramp_step(&r, 100.0f, 10u, 500u, 1000u), 50.0, 0.001);
+    /* Mismo ts y mismo objetivo, pero tramo mas largo: tambien se rehace. */
+    CHECK_NEAR(obd_ramp_step(&r, 100.0f, 10u, 500u, 2000u), 50.0, 0.001);
+    CHECK_NEAR(obd_ramp_step(&r, 100.0f, 10u, 1500u, 2000u), 75.0, 0.001);
+
+    /* Dos lecturas en el mismo fotograma no mueven nada la segunda vez. */
+    obd_ramp_reset(&r);
+    obd_ramp_step(&r, 0.0f, 20u, 0u, 1000u);
+    obd_ramp_step(&r, 100.0f, 21u, 0u, 1000u);
+    float once = obd_ramp_step(&r, 100.0f, 21u, 250u, 1000u);
+    float twice = obd_ramp_step(&r, 100.0f, 21u, 250u, 1000u);
+    CHECK_NEAR(once, twice, 0.0001);
+
+    /* Desbordamiento del contador de milisegundos. */
+    obd_ramp_reset(&r);
+    obd_ramp_step(&r, 0.0f, 30u, 0xFFFFFE00u, 1000u);
+    obd_ramp_step(&r, 100.0f, 31u, 0xFFFFFE00u, 1000u);
+    float wrap = obd_ramp_step(&r, 100.0f, 31u, 0x00000100u, 1000u);
+    CHECK(wrap > 0.0f);
+    CHECK(wrap < 100.0f);
+
     /* Un tramo de duracion cero coloca el valor de golpe. */
     CHECK_NEAR(obd_ramp_step(&r, 900.0f, 4u, 600u, 0u), 900.0, 0.001);
 
