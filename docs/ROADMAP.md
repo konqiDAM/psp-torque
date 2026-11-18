@@ -242,19 +242,27 @@ the MiTo's 50-67 ms and 12-14 req/s. What was measured is in
 - [x] **K1b - A log that survives.** Written to the card every second, filesystem sync
   every 2 s. Before, leaving the app without the menu left the log with the boot lines
   only (235 bytes of an entire session).
-- [ ] **K2 - Period split by measured capacity.** The base periods assume 12-14 req/s;
-  K-line gives 1.9. Measured: RPM every 4.4 s. The scheduler must start from the link's
-  capacity (measured, or by protocol class) and split: few PIDs, fast, with the slow ones
-  off-screen. Criterion: at idle and while driving, RPM at >= 1 Hz and the four values of
-  the active screen at >= 0.5 Hz, without saturating the link.
+- [x] **K2 - Period split by measured capacity.** Done in `fase2.46`. The base table
+  is a demand for 12-14 req/s; when it does not fit 85% of the link's capacity the plan
+  compresses: RPM at 1 Hz, the next three values on the active screen sharing the rest,
+  everything else at one request a minute. The period subtracts the service time, because
+  the scheduler measures it from completion. The selector also changes while compressed:
+  priority first, then the oldest deadline - pure EDF was why RPM starved, as a
+  short-period PID is almost never overdue. Capacity is the protocol class, lowered on
+  K-line by what a 10 s window measures; CAN is never measured, so that car's behaviour
+  cannot depend on a measurement. Measured criterion, because the original wording was
+  arithmetically impossible: RPM at 1 Hz plus four values at 0.5 Hz is 3 req/s against
+  1.879 delivered and a 2.61 theoretical floor. The plan gives RPM >= 0.9 Hz with up to
+  three values at >= 0.15 Hz and stays under 85% utilisation.
 - [ ] **K3 - GENERAL panel without MAP.** On a naturally aspirated car with no `0B` and
   no `33` the centre boost gauge is a permanent `N/D`. Replace it with MAF (g/s) and load
   (%), and disable `TURBO AUTO` learning when there is no MAP. Criterion: the GENERAL
   screen shows no permanently missing value.
-- [ ] **K4 - K-line module discovery.** `obd_disc_parse_line` only recognises CAN headers
-  (3 or 8 hex digits). This car's real header is `48 6B 10` (three bytes, six digits).
-  Criterion: a unit test with the line `48 6B 10 41 00 BE 1F B8 11 AA` returning mask
-  `BE1FB811`, and the MODULOS screen finding the ECU over K-line.
+- [ ] **K4 - K-line module discovery.** Half done. The parser now understands the
+  three-byte header (`48 6B 10`) with a unit test built from the captured line, and the
+  mask comes back as `BE1FB811`. Still open: the MODULOS scan itself sends CAN/UDS
+  headers, so on K-line the screen stays greyed on purpose - the next step is a K-line
+  path that reads `0100` with headers on and nothing else.
 - [ ] **K5 - Link stability.** Two drops in five minutes in `phase1_003` (at 157 s and
   233 s), the second one never recovered. Separate adapter, PSP WiFi and car, and decide
   whether reconnecting needs more than the current three attempts.
