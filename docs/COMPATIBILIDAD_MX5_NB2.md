@@ -163,6 +163,16 @@ Three things came out of it:
    frame that was running when the fault set. The screen now says `SIN MODO 02` rather
    than leaving the row empty, and the app no longer spends five requests asking.
 
+4. **The link indicator flickered orange/green once a second.** The freshness
+   thresholds were fixed at 1000 ms for "old data" and 3000 ms for "no data", which
+   is right for CAN, where a PID comes back every 330 ms. Here each request takes
+   383 ms and the plan spreads fifteen PIDs over a 2.3 req/s bus, so a value is
+   refreshed every 1–2 s: every one of those gaps crossed 1000 ms, which dimmed the
+   whole panel to 55 % and put the header on `DATOS VIEJOS`. The thresholds now
+   scale with the measured gap between accepted samples (five gaps for old, fifteen
+   for dead, floored at the old 1000/3000 ms so a fast car behaves exactly as
+   before).
+
 Not yet exercised on this car: the `FALLOS` screen itself (mode 03/07/0A), the gear
 indicator (needs the profile, so it read `N/D` all session), and any driving data.
 

@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.49 2026-11-18 perfil tras fijar protocolo, recuperacion de ECU en silencio, sin modo 02"
+#define BUILD_TAG "fase2.50 2026-11-18 perfil tras fijar protocolo, ECU en silencio, indicador escalado al enlace"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -515,6 +515,49 @@ static app_settings g_cfg = { 0, 0, 0, 1, 1, 0, 1, 0,
 static const int g_elm_gap_values[7] = { 0, 2, 4, 6, 8, 12, 17 };
 static int g_elm_min_gap_ms = ELM_GAP_DEFAULT_MS;
 static uint32_t g_last_resp_ms = 0;   /* anclaje del hueco */
+
+/* Cadencia real del enlace (FASE F2b): hueco entre muestras aceptadas.
+ *
+ * Los umbrales de frescura no pueden ser fijos: en CAN un PID vuelve cada
+ * ~330 ms y 1000 ms de silencio ya es un aviso, pero en el K-line de la
+ * MX-5 cada peticion tarda 383 ms y el plan reparte quince PIDs, asi que
+ * un valor se refresca cada 1-2 s y el umbral fijo ponia el indicador a
+ * parpadear entre naranja y verde una vez por segundo, atenuando el panel
+ * entero. Se escala con el hueco medido y se deja el suelo de siempre,
+ * asi que un coche rapido no cambia de comportamiento. */
+#define DATA_OLD_MS      1000u
+#define DATA_OLD_MAX_MS  12000u
+
+static uint32_t g_sample_iv_ms = 0;   /* media movil del hueco entre muestras */
+static uint32_t g_last_sample_ms = 0;
+
+static uint32_t data_old_ms(void)
+{
+    uint32_t old = g_sample_iv_ms * 5u;
+    if (old < DATA_OLD_MS) {
+        old = DATA_OLD_MS;
+    }
+    if (old > DATA_OLD_MAX_MS) {
+        old = DATA_OLD_MAX_MS;
+    }
+    return old;
+}
+
+/* La muestra se ha aceptado: se apunta su instante para estimar el hueco.
+ * Un salto de mas de 10 s es una reconexion, no cadencia: no entra en la
+ * media. */
+static void data_note_sample(uint32_t now)
+{
+    if (g_last_sample_ms != 0 && now > g_last_sample_ms) {
+        uint32_t iv = now - g_last_sample_ms;
+        if (iv < 10000u) {
+            g_sample_iv_ms = g_sample_iv_ms
+                                 ? (g_sample_iv_ms * 7u + iv) / 8u
+                                 : iv;
+        }
+    }
+    g_last_sample_ms = now;
+}
 
 /* Lo que aporta el perfil del coche (FASE U4): si esta a 0 se usa el
  * criterio de siempre, para que un coche sin perfil no cambie nada. */
@@ -3495,6 +3538,8 @@ static int connect_network_and_elm(Target *targets, int *target_count,
     g_connect_cancel = 0;
     g_elm_stuck = 0;
     g_no_data_streak = 0;
+    g_sample_iv_ms = 0;
+    g_last_sample_ms = 0;
 
     obd_store_init(&g_store);
     boost_init(&g_boost, PROFILE_BARO_FALLBACK_KPA);
@@ -4653,18 +4698,22 @@ static uint32_t data_age_ms(uint32_t now)
 /* FASE F2: umbrales de la edad del dato.
  *
  * OLD: a partir de aqui el contenido se atenua y la cabecera dice
- *      "DATOS VIEJOS". Con el RPM a ~330 ms son tres periodos, asi que
- *      no parpadea con un timeout puntual.
- * DEAD: a partir de aqui el dato ya no sirve y se muestra "SIN DATOS". */
-#define DATA_OLD_MS  1000u
-#define DATA_DEAD_MS 3000u
-
+ *      "DATOS VIEJOS".
+ * DEAD: a partir de aqui el dato ya no sirve y se muestra "SIN DATOS".
+ *
+ * Los dos se escalan con el hueco real entre muestras, no con una
+ * constante: en CAN un PID vuelve cada ~330 ms y 1000 ms de silencio ya
+ * es un aviso, pero en el K-line de la MX-5 cada peticion tarda 383 ms y
+ * el plan reparte quince PIDs, asi que un valor se refresca cada 1-2 s y
+ * el umbral fijo ponia el indicador a parpadear entre naranja y verde
+ * una vez por segundo, atenuando el panel entero. El suelo sigue siendo
+ * el de siempre, asi que un coche rapido no cambia de comportamiento. */
 static int data_is_stale(uint32_t now)
 {
     if (g_demo) {
         return 0;
     }
-    return data_age_ms(now) > DATA_DEAD_MS;
+    return data_age_ms(now) > data_old_ms() * 3u;
 }
 
 /* Historial por canal: cada elemento declara su PID de origen. Los
@@ -5480,7 +5529,7 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms)
             dot = QV_AMBER;
             state = tr("SIN DATOS");
             state_color = QV_AMBER;
-        } else if (age_ms >= DATA_OLD_MS) {
+        } else if (age_ms >= data_old_ms()) {
             /* FASE F2: el dato envejece. Se avisa en vez de dejar el
              * panel congelado sin explicacion. */
             dot = QV_AMBER;
@@ -8898,7 +8947,7 @@ static void draw_screen(uint32_t now, int requests, int data_count,
     /* FASE F2: si el dato envejece, el contenido se apaga (el marco se
      * queda). El panel deja de parecer congelado y empieza a explicar
      * que lo que hay dentro ya no es de ahora. */
-    g_gfx_dim = (age_ms >= DATA_OLD_MS) ? 55 : 100;
+    g_gfx_dim = (age_ms >= data_old_ms()) ? 55 : 100;
 
     theme_effects_update(now);
 
@@ -9837,6 +9886,7 @@ static void run_dashboard(Target *targets, int target_count)
             int got_data = 0;
             if (reply->data && elm_frame_matches(&reply->frame, 0x01, pid)) {
                 store_value(pid, &reply->frame, t1);
+                data_note_sample(t1);
                 got_data = 1;
                 data_count++;
             } else if (reply->no_data) {
