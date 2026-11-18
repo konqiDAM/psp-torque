@@ -315,7 +315,7 @@ the layout per car, and let the app work out which car it is in. Full design in
 `docs/superpowers/specs/2026-11-17-ui-screens-preferences-and-vehicle-profiles-design.md`.
 
 - [x] **U1 - Screen picker on SELECT.** Done in `fase2.44`. SELECT opens a full-screen
-  list of all eight screens with a one-line purpose each; UP/DOWN moves, X or START opens
+  list of all screens with a one-line purpose each (eight when U1 landed, nine since FALLOS); UP/DOWN moves, X or START opens
   it, SELECT or CIRCLE closes it. START keeps the settings menu. The current screen is
   marked ACTUAL and the selection skips screens this car cannot use.
 - [x] **U2 - Two-tier bar.** Done in `fase2.44`. GENERAL, MOTOR, DIAG and TELEM are the
@@ -350,9 +350,9 @@ and the masks it was recognised by. On the MiTo nothing changes except the bar.
 ## Fase 7 - Primeras sesiones reales con el MX-5
 
 Objetivo: que el cuadro sirva en el coche. Tres sesiones con el motor en marcha
-(`phase1_006`, `007` y `008`, 610 s en total) destaparon ocho defectos que ningun
+(`phase1_006`, `007`, `008` y `009`, 609 s en total) destaparon nueve defectos que ningun
 test ni emulador habria encontrado, porque todos dependen de como se porta el
-enlace real. Todo cerrado entre `fase2.49` y `fase2.55`, cada uno con la linea
+enlace real. Todo cerrado entre `fase2.49` y `fase2.56`, cada uno con la linea
 del log que lo demuestra.
 
 - [x] **P1 - Identificar el coche despues de fijar el protocolo.** `fase2.49`.
@@ -379,14 +379,21 @@ del log que lo demuestra.
 - [x] **P7 - Una muestra vale tres ciclos de su PID.** `fase2.53`. Con 6 s fijos,
   el refrigerante salia `N/D` en 45 de 127 muestras, la velocidad en 53 y el aire
   en 57. Ahora 0, 0 y 11.
-- [x] **P8 - El plan deja de comerse a si mismo.** `fase2.53` y `fase2.55`. El
-  estimador comparaba lo entregado con lo que pedia la tabla (siempre mas que el
-  presupuesto) y recortaba en cada ventana: 2,40 -> 0,80 req/s en cuatro minutos.
-  Ahora compara con el presupuesto y recorta por debajo del 70 %, con lo que el
-  enlace se queda arriba en vez de oscilar.
-- [x] **P9 - Interpolacion de presentacion.** `fase2.55`. Entre dos muestras el
-  valor pintado se mueve hacia la ultima medida en cada fotograma (tau = periodo/3,
-  120-800 ms). El log y los maximos siguen leyendo la medida cruda.
+- [x] **P8 - El plan deja de comerse a si mismo.** `fase2.53` y el umbral del 70 %
+  en `585b75b`. El estimador comparaba lo entregado con lo que pedia la tabla
+  (siempre mas que el presupuesto) y recortaba en cada ventana: 2,40 -> 0,80 req/s
+  en menos de dos minutos. Con el umbral en el 70 % deja de caer y vuelve a subir;
+  `phase1_009` lo confirma: dos lineas de `Enlace` en toda la sesion, las dos en el
+  techo.
+- [x] **P9 - Interpolacion de presentacion.** `585b75b` y rehecha en `fase2.56`.
+  Entre dos muestras el valor pintado recorre el escalon entero en linea recta
+  durante el intervalo de muestreo de ese PID (150 ms - 4 s). La primera version
+  usaba un filtro exponencial con tau = periodo/3 y no servia: cubria el 95 % en el
+  primer tercio y se quedaba parada el resto, que es lo que se veia como "no es
+  progresivo". El log de estado lee la medida cruda.
+- [x] **P10 - Caducidad por cadencia real.** `fase2.56`. Una muestra vale tres veces
+  el intervalo **real** de su PID (media movil del hueco medido), no el que promete
+  el plan, con suelo de 6 s y techo de 30. Cierra los ultimos `N/D` intermitentes.
 
 Criterio: el coche se identifica solo, una sesion completa sin `NO DATA`, los
 indicadores se mueven y no parpadean a `N/D`, y salir deja el resumen en el log.

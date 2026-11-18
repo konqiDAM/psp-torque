@@ -111,9 +111,10 @@ También puedes cambiar IP y puerto desde el propio menú de la app.
 
 ### Binario precompilado
 
-Hay una **Release** adjunta con `EBOOT.PBP` ya compilado para
-`fase2.39`. No hace falta compilar nada para usarlo; compilar solo hace falta
-si quieres tocar el código.
+Hay una **Release** adjunta con `EBOOT.PBP` ya compilado, pero es de
+`fase2.39`: no tiene ni el perfil del MX-5 ni la salida limpia ni la pantalla
+FALLOS que se describen aquí. Para lo que cuenta esta página hay que compilar, o
+pedir el `EBOOT` de la última sesión.
 
 ## Controles
 
@@ -122,7 +123,7 @@ si quieres tocar el código.
 | `L` / `R` / `◀` / `▶` | Cambiar de pantalla de conducción (GENERAL, MOTOR, DIAG, TELEM) |
 | `SELECT` | Abrir / cerrar el selector de pantallas |
 | `START` | Abrir / cerrar el menú de ajustes |
-| `START` (mantener 1,2 s) | Salir de la aplicación, también desde las pantallas con bucle propio (sniffer, FALLOS, escaneo) |
+| `START` (mantener 1,2 s) | Salir de la aplicación; también desde el sniffer y desde FALLOS, que corren su propio bucle. Un escaneo en curso se cancela con `CIRCLE` |
 | `TRIANGLE` | Reconectar con el perfil WiFi guardado |
 | `SQUARE` | Abrir el diálogo WiFi de la PSP y reconectar |
 | `X` o `START` | Saltar la animación de arranque · confirmar · salir del modo demo |
@@ -138,7 +139,7 @@ Desde una pantalla de herramientas, `L`/`R` vuelve a GENERAL.
 
 ## El selector de pantallas
 
-`SELECT` abre la lista completa de las ocho pantallas con una línea de para qué sirve
+`SELECT` abre la lista completa de las nueve pantallas con una línea de para qué sirve
 cada una. Arriba y abajo mueven, `X` o `START` abre la elegida, `SELECT` o `CIRCLE`
 cierra la lista. Las pantallas que el coche no puede usar salen en gris con el motivo:
 en un coche anterior a CAN, MODULOS y SNIFFER necesitan CAN y no se ofrecen.
@@ -161,9 +162,11 @@ salir. Si se quedó en una herramienta, abre GENERAL.
 | **MOTOR** | Rejilla de tiles: MAP (o MAF), BOOST, ECT, IAT, acelerador, mariposa/load, tensión, aceite y combustible. Las cajas no disponibles se compactan: no dejan huecos. |
 | **DIAG** | Diagnóstico avanzado de solo lectura: STFT, LTFT, avance, tensiones O₂, combustible, voltaje, distancia con MIL y voltaje de batería. |
 | **TELEM** | Gráfica de 5 series a la vez + máximos/mínimos de sesión. |
+| **FALLOS** | Códigos de avería: estado de la lámpara, guardados (03), pendientes (07) y permanentes (0A) con su significado, decodificados en la PSP, más la foto del fallo (02) si la ECU la da. `X` lee, `CIRCLE` limpia la pantalla — nunca la centralita. |
 | **MODULOS** | Descubrimiento de centralitas OBD‑II y UDS. `X` lanza el escaneo. Funciona también en coches de K-line, donde lee las máscaras OBD‑II y se salta el sondeo que es solo CAN. |
 | **SNIFFER** | Captura de todo el tráfico CAN del bus. `X` inicia o detiene. |
 | **INFO** | Qué es cada parámetro, con su PID estándar de origen. |
+| **SONDA** | Lee los PID uno a uno y dice cuáles responde la ECU, cuáles dan `NO DATA` y cuáles no existen. Tarda 30–60 s y se cancela con `CIRCLE`. |
 
 ### Ajustes
 
@@ -316,17 +319,17 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
   ahora da ~18. La cadencia de dibujo no cambia: sigue contando VBlanks.
 - **Cadencia adaptativa, por dos bucles.** El primero reparte el presupuesto
   del enlace entre lo que pide la pantalla activa y lo que no, y se recalcula
-  al cambiar de pantalla y cada 10 s. El segundo mide lo que el adaptador
-  entrega de verdad y sube o baja ese presupuesto. En CAN el techo son ~18
-  peticiones/s; en el K-line de la MX-5, 2,5 (383 ms por petición). Un test
-  del núcleo calcula la demanda y falla si se pasa del presupuesto.
+  al cambiar de pantalla o de capacidad. El segundo mide lo que el adaptador
+  entrega de verdad y sube o baja ese presupuesto cada 10 s. En CAN se planifica
+  a 16,5 peticiones/s; en el K-line de la MX-5, a 2,2 (383 ms por petición son
+  2,6 físicos). Un test del núcleo calcula la demanda y falla si se pasa.
 - **Interpolación de presentación:** entre dos muestras el valor pintado
   recorre el escalón entero en línea recta durante el intervalo de muestreo de
-  ese PID (150 ms–4 s), así que la aguja está siempre en movimiento y llega al
-  valor nuevo cuando entra el siguiente. Cuesta un intervalo de retraso, que es
-  el precio del movimiento continuo. No extrapola: si una muestra no llega, el
-  valor se queda donde está, y si envejece se sigue mostrando `N/D`. Se apaga
-  con el ajuste **SUAVIZADO**.
+  ese PID, así que la aguja se mueve durante todo el intervalo y llega al valor
+  nuevo al entrar el siguiente. El tramo está topado en 4 s: lo que vuelve más
+  despacio llega antes y espera. Cuesta un intervalo de retraso, que es el precio
+  del movimiento continuo. No extrapola: si una muestra no llega, el valor se
+  queda donde está, y si envejece se sigue mostrando `N/D`.
 - **Filtro de 150 ms sobre la muestra**, aparte de la interpolación: quita el
   ruido del propio dato en el momento de guardarlo.
 - **Cadencia por VBlank:** el dibujo se sincroniza con `sceDisplayGetVcount()`

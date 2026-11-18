@@ -110,9 +110,10 @@ You can also change the IP and port from the in-app menu.
 
 ### Pre-built binary
 
-A **Release** is attached with `EBOOT.PBP` already built for `fase2.39`.
-There is nothing to compile to use it; building is only needed if you want to
-change the code.
+A **Release** is attached with a prebuilt `EBOOT.PBP`, but it is `fase2.39`:
+it has neither the MX-5 profile nor the clean exit nor the FALLOS screen this
+page describes. For what is documented here you need to build it (or ask for the
+`EBOOT` from the latest session).
 
 ## Controls
 
@@ -121,7 +122,7 @@ change the code.
 | `L` / `R` / `◀` / `▶` | Change driving screen (GENERAL, MOTOR, DIAG, TELEM) |
 | `SELECT` | Open / close the screen picker |
 | `START` | Open / close the settings menu |
-| `START` (hold 1.2 s) | Quit, including from screens that run their own loop (sniffer, FALLOS, scan) |
+| `START` (hold 1.2 s) | Quit, including from the sniffer and FALLOS, which run their own loop. A running scan is cancelled with `CIRCLE` |
 | `TRIANGLE` | Reconnect using the saved WiFi profile |
 | `SQUARE` | Open the PSP WiFi dialog and reconnect |
 | `X` or `START` | Skip the boot animation · confirm · leave demo mode |
@@ -137,7 +138,7 @@ From a tool screen, `L`/`R` goes back to GENERAL.
 
 ## The screen picker
 
-`SELECT` opens a full list of the eight screens with one line of purpose each. Up and
+`SELECT` opens a full list of the nine screens with one line of purpose each. Up and
 down move, `X` or `START` opens the chosen screen, `SELECT` or `CIRCLE` closes the list.
 Screens the car cannot use are greyed with the reason: on a pre-CAN car, MODULOS and
 SNIFFER need CAN and stay out of reach.
@@ -163,6 +164,7 @@ If it was left on a tool screen it opens GENERAL instead.
 | **FALLOS** | Fault codes: lamp state, stored (03), pending (07) and permanent (0A) codes with their meaning, decoded locally, plus the freeze frame (02) that was stored with the first code. `X` reads, `CIRCLE` clears the screen — never the ECU. When the lamp is on it also shows as a red MIL in the top bar for the rest of the session. |
 | **SNIFFER** | Capture of all CAN bus traffic. `X` starts or stops it. |
 | **INFO** | What each parameter means, with the standard PID it comes from. |
+| **SONDA** | Reads every PID one at a time and reports which ones the ECU answers, which return `NO DATA` and which do not exist. Takes 30–60 s and is cancelled with `CIRCLE`. |
 
 ### Settings
 
@@ -312,17 +314,18 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
   delivers ~18. The draw cadence does not change: it still counts VBlanks.
 - **Two adaptive loops set the rate.** The first divides the link budget
   between what the active screen shows and what it does not, and is recomputed
-  on every screen change and every 10 s. The second measures what the adapter
-  actually delivers and raises or lowers that budget. On CAN the ceiling is
-  ~18 requests/s; on the MX-5's K-line it is 2.5 (383 ms per request). A core
-  test computes the demand and fails if it goes over budget.
+  on every screen change or capacity change. The second measures what the
+  adapter actually delivers and raises or lowers that budget every 10 s. On CAN
+  the plan targets 16.5 requests/s; on the MX-5's K-line, 2.2 (383 ms per
+  request is 2.6 physical). A core test computes the demand and fails if it goes
+  over budget.
 - **Display interpolation:** between samples, the drawn value walks the whole
-  step in a straight line across that PID's sampling interval (150 ms–4 s), so
-  the needle is always moving and reaches the new value as the next sample
-  arrives. It costs one interval of lag, which is the price of continuous
-  motion. It never extrapolates: if a sample does not arrive the value stays
-  where it is, and a stale value still becomes `N/D`. Turned off by the
-  **SUAVIZADO** setting.
+  step in a straight line across that PID's sampling interval, so the needle
+  moves for the whole interval and reaches the new value as the next sample
+  arrives. The walk is capped at 4 s: anything slower arrives early and waits.
+  It costs one interval of lag, which is the price of continuous motion. It
+  never extrapolates: if a sample does not arrive the value stays where it is,
+  and a stale value still becomes `N/D`.
 - **A 150 ms filter on the sample**, separate from the interpolation: it
   removes noise from the measurement itself when it is stored.
 - **VBlank cadence:** drawing is synchronised with `sceDisplayGetVcount()`

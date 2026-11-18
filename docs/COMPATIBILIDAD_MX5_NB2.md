@@ -135,7 +135,7 @@ unknown. `tests/test_vehicle.c` pins both sides of that border.
 Vehiculo: Generic K-line (generico, proto A0, mascaras BE1FB811/80000000/00000000)
 ATDPN (conexion): A3
 Enlace: 2.30 req/s entregadas, pedidas 2.44; plan 2.20 req/s (comprimido)
-t=154 rpm=2137 ect=67 iat=27 spd=0 load=31 maf=3.01
+t=154 rpm=2137 map=N/D boost=N/D ect=67 iat=27 spd=0 rtt=384 gap=167 gapcfg=8 ok=360 nd=0 to=14 fps=30 cpu=2 wait=13 int=33 vb=2 v=6648
 ```
 
 | Reading | Value over the session |
@@ -143,16 +143,17 @@ t=154 rpm=2137 ect=67 iat=27 spd=0 load=31 maf=3.01
 | rpm | 1002 → 820 idle once warm, blips to 1433 and 2137 |
 | coolant | 40 → 67 °C (warming from cold, never reached thermostat) |
 | intake air | 23–27 °C |
-| MAF | 3.0–3.7 g/s at idle |
-| engine load | 12–18 % |
-| timing advance | 43.5° |
+| MAF | 2.4–3.5 g/s at idle, 8.9 on the blip |
+| engine load | 9–27 % |
+| timing advance | 9.5–22.5° (J1979: byte/2 − 64) |
 | throttle | 0 % (the car has `11` but not `49`/`4A`, so this is the plate, not the pedal) |
 
-Three things came out of it:
+Four things came out of it:
 
 1. **The profile bug above.** The car answered `4100BE1FB811` exactly as expected and
    still came out generic. Fixed in `fase2.49`.
-2. **A silent ECU left the screen frozen.** The last 28 s of the log are 55 consecutive
+2. **A silent ECU left the screen frozen.** The last 42 s of the log (from `t=155` to
+   `t=198`) are 55 consecutive
    `NO DATA` replies while the adapter itself answered every command: the engine was
    switched off and the app kept showing the last good rpm. A NO DATA reply carries
    bytes, so the dead-link counter never fired. Twenty in a row now escalate to the
@@ -191,21 +192,22 @@ Sesion: 255 s, reconexiones=0, caidas=0
 Three things settled and two found:
 
 - **The profile works.** It is the car, not a generic K-line, so the tacho ends at
-  8000, the red zone is at 7000 and the gear ratios are live.
+  8000, the red zone is at 7000 and the gear ratios are loaded — unproven, since no
+  session so far has moved (the gear needs speed above zero).
 - **The link is clean.** 425 requests, 425 answers, zero `NO DATA`, zero timeouts,
   zero reconnects: the 1000 ms K-line timeout removed the late-prompt desyncs that
   used to cost a request each.
 - **The clean exit writes the summary**, which is how we now know how a session went
   without reading 36 KB of protocol traffic.
-- **The plan collapses by itself** (`2.40` delivered at the start, `0.80` four minutes
-  later, on a link that carries 2.30). The capacity estimator compared the delivered
+- **The plan collapses by itself** (`2.40` delivered at `t=12`, plan `0.80` at `t=112`,
+  under two minutes, on a link that carries 2.30). The capacity estimator compared the delivered
   rate against what the *table* wanted rather than against what the *plan* chose to
   spend, and with the plan compressed the table always asks for more, so it cut every
   window and never came back. `fase2.53` compares against the budget.
 - **Every value but rpm blinked to `N/D`** for a third of the time (coolant 45 of 127
   samples, intake 57, speed 53). A sample was trusted for a flat 6 s while the plan
   refreshes each one every 6–9 s. A sample now lasts three of its own cycles, floor
-  6 s, cap 20 s.
+  6 s, cap 30 s.
 
 ## 3e. Third session, `phase1_008` (fase2.54)
 
@@ -228,12 +230,19 @@ Enlace: 1.54 req/s medidas, plan 1.31 req/s (comprimido)
 
 Three fixes are visible in that table: a sample now stays valid for three of its own
 cycles instead of a flat 6 s, the capacity estimator no longer ratchets the plan down,
-and with more of the budget reaching the slower PIDs they refresh almost twice as often.
+and with more of the budget reaching the slower PIDs, coolant and speed refresh almost
+twice as often. Intake air did not improve (9.4 s to 9.8 s) and is the one still
+blanking occasionally.
 
-One knob left open at the time: the estimator then sawtoothed (2.20 -> 1.40 -> 1.54 ->
-1.86 -> 2.05 -> 2.20) because the cut threshold (0.85 of the request) sat exactly on what
-a healthy link delivers when the plan asks for 85 % of capacity. `fase2.55` moved it to
-0.70. Not yet confirmed in a log.
+One knob was left open at the time: the estimator sawtoothed (2.20 -> 1.40 -> 1.54 ->
+1.69 -> 1.86 -> 2.05 -> 2.20), because the cut threshold was 0.85 of the request and the
+plan asks for exactly 85 % of capacity, so a healthy link sat on the line. The threshold
+is 0.70 since `585b75b` and `phase1_009.log` confirms it: 175 s, 335 requests, 335
+answers, two `Enlace` lines in the whole session instead of nine, both at the ceiling
+(`2.40` delivered against a `1.87` plan, then `2.20`).
+
+A sample is now trusted for three of its **own real** intervals rather than the period
+the plan promised, capped at 30 s, which is what removed the last of the blanking.
 
 ## 4. Design consequences
 
@@ -270,7 +279,7 @@ each time), and it is 1000 ms on K-line since `fase2.49`.
 
 Two mechanisms now cover the genuine failure modes: twenty consecutive `NO DATA` escalate
 to a reconnect (`fase2.49`), and the adapter stuck on `STOPPED` still escalates after
-eight replies (`fase2.44`).
+eight replies (`fase2.42`).
 
 ## 6. How to repeat the probe
 

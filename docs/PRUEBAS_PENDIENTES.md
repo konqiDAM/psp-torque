@@ -11,10 +11,10 @@ stated otherwise.
 | T1 | Full probe on the MX-5 | OK: `A3` ISO 9141-2, 13/18 PIDs, header `48 6B 10` |
 | T2 | Protocol search with the 20 s wait | OK: `0100` answered at 4315 ms |
 | T3 | Log written to the card every second | OK in `phase1_003` (317 s complete) |
-| T4 | Link drops (adapter, WiFi or car?) | Answered in `007`/`008`: 411 s with zero drops, zero reconnects. The silence in `006` was the ignition going off while the app polled |
-| T12 | Clean exit writes the session summary | OK in `007` and `008`: `Salida solicitada: cierre limpio` plus the full `=== RESUMEN ===` block |
+| T4 | Link drops (adapter, WiFi or car?) | Answered in `007`/`008`: 255 s and 156 s, two sessions, zero drops and zero reconnects. The silence in `006` was the ignition going off while the app polled. The 15-minute single run was not done and is no longer a criterion |
+| T12 | Clean exit writes the session summary | OK in `007`, `008` and `009` through the `SALIR` row: `Salida solicitada: cierre limpio` plus the full `=== RESUMEN ===` block. The hold-START path is the same code but no log exercises it yet |
 | T13 | Car identified from the masks | OK in `007`/`008`: `Vehiculo: Mazda MX-5 NB2 tacometro=8000 rojo=7000 corte=7200`, no longer generic |
-| T14 | No `N/D` blanking between samples | OK in `008`: coolant 0/77, speed 0/77, intake 11/77 (was 45/127, 53/127, 57/127) |
+| T14 | No `N/D` blanking between samples | Better, not closed: coolant 0/77 and speed 0/77 (was 45/127, 53/127), intake 11/77 (was 57/127). Intake still blanks after a 40 s hole in its own polling; `fase2.56` now sizes the window from the real interval instead of the planned one |
 | T15 | No late-prompt desyncs | OK in `007`/`008`: zero `STOPPED` and zero `sin prompt` over 411 s, after the K-line request timeout went to 1000 ms |
 
 ## Pending
@@ -31,13 +31,20 @@ the demand line printed by the core test.
 **Done when:** RPM at ≥ 1 Hz and the four values of the active screen at ≥ 0.5 Hz,
 without asking for more than the link can give.
 
-**Measured on the MX-5 (`008`, `fase2.54`):** RPM at 1.06 s holds. The four values of
-the active screen do **not** reach 0.5 Hz — coolant 4.2 s, speed 4.4 s, intake ~9.7 s —
-and on this bus they cannot: four values at 0.5 Hz is 2 requests/s plus rpm, and the
-whole link carries 2.5. The criterion is a CAN criterion. On K-line the equivalent is
-"rpm at ≥ 1 Hz, the values on screen inside their own refresh window, and nothing
-blanking", which `008` meets. Reaching 0.5 Hz on this car needs a faster adapter, not
+**Measured on the MX-5 (`009`, `fase2.55`):** RPM at 1.11 s holds, so the first half of
+the criterion passes. The second half does **not**: coolant came every 3.4 s and speed
+every 3.4 s, and intake every 7 s. It cannot pass on this bus — four values at 0.5 Hz is
+2 requests/s on its own, and the whole link carries 2.2 by design (2.6 is the physical
+ceiling at 383 ms per request). The criterion was written for CAN.
+
+The K-line equivalent, and what actually gets accepted here, is: rpm at ≥ 1 Hz, every
+value on screen inside three of its own refresh intervals so nothing blanks, and no more
+asked of the link than it gives. `009` meets that. Reaching 0.5 Hz on four values needs a
+faster adapter (a genuine ELM327 is 100–150 ms per request on K-line instead of 383), not
 different code.
+
+**Status:** closed for K-line with the criterion above; still open as written for CAN
+until a MiTo session measures it.
 
 ### T6 — GENERAL panel without MAP (needs K3)
 

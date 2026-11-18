@@ -229,7 +229,7 @@ El filtro del núcleo (`obd_smooth`) usa constante de tiempo fija
 (`tau = 150 ms`): `alpha = 1 - exp(-dt/tau)`. El retardo es siempre `tau`,
 venga la cadencia como venga.
 
-### 5.5b Interpolación de presentación (fase2.55)
+### 5.5b Interpolación de presentación (fase2.55, rehecha en fase2.56)
 
 El filtro anterior se aplica **al guardar la muestra**, así que entre dos
 muestras el valor está quieto: en CAN no se nota (un PID vuelve cada 330 ms),
@@ -239,8 +239,11 @@ correcto.
 
 `sample_value()` aplica ahora `obd_ramp_step()` en cada fotograma: el valor
 pintado **recorre el escalón entero en línea recta** durante el intervalo de
-muestreo de ese PID (150 ms - 4 s), así que la aguja está siempre en movimiento
-y llega al valor nuevo justo cuando entra el siguiente.
+muestreo de ese PID (150 ms - 4 s), así que la aguja se mueve durante todo el
+intervalo y llega al valor nuevo al entrar el siguiente. El tramo está topado en
+4 s: un PID que vuelve cada 7 o 10 s recorre el escalón en 4 s y espera la
+muestra siguiente, que es lo que queda de la versión exponencial sin volver a
+pararse al principio.
 
 La primera versión usaba un filtro exponencial con `tau = periodo/3` y no valía:
 cubría el 95 % del escalón en el primer tercio del intervalo y se quedaba parada
@@ -250,13 +253,15 @@ continuo.
 
 - Solo se acerca a medidas que han llegado: no extrapola.
 - La antigüedad y el `N/D` se miden con la marca de la muestra, no con esto, y
-  caducan con el intervalo **real** de ese PID (media móvil del hueco entre
-  muestras), no con el que promete el plan: el aire de admisión volvía cada 7 s
-  con la ventana calculada en 9 y salía `N/D` en 17 de 87 muestras.
+  caducan a los tres intervalos del PID tomando el **mayor** entre el intervalo
+  real medido (media móvil del hueco entre muestras) y el que promete el plan,
+  con suelo de 6 s y techo de 30: el aire de admisión volvía cada 7 s con la
+  ventana en 9 y salía `N/D` en 11 de 77 muestras (`008`).
 - `sample_value_raw()` es la lectura exacta, y es la que usan el log de estado y
-  los máximos: la evidencia no puede ser la animación.
+  el máximo de velocidad: la evidencia no puede ser la animación.
 - Se reinicia al conectar y al cambiar el ajuste, para no arrastrar medio valor.
-- Se apaga con el ajuste `SUAVIZADO`.
+- Hoy no se puede apagar: `settings_apply()` fuerza `smooth = 1`. El ajuste
+  existió y la cadena de traducción sigue ahí, pero no hay fila en el menú.
 
 ### 5.6 Reparto del ancho de banda por pantalla (FASE F3)
 
@@ -278,12 +283,13 @@ activa; fuera de ella se multiplican por 4 con tope de 30 s.
 `apply_screen_schedule()` (capa PSP) recalcula los periodos al cambiar de
 pantalla y deja pendientes de inmediato los PID que acaban de aparecer.
 
-### 5.6b Enlace lento: reparto y estimación de capacidad (FASE K2, fase2.53)
+### 5.6b Enlace lento: reparto y estimación de capacidad (FASE K2, umbral en 585b75b)
 
-Esa tabla está dimensionada para CAN. En K-line el techo real son **2,5
-peticiones/s** (383 ms por petición medidas en la MX-5), así que quince PID no
-caben: el plan se comprime y reparte el presupuesto por niveles — RPM, valores
-visibles en la pantalla activa, y fondo.
+Esa tabla está dimensionada para CAN. En K-line con la que se planifica son
+**2,2 peticiones/s** (`PROFILE_LINK_CLASS_KLINE`; 383 ms por petición medida en
+la MX-5 son 2,6 físicos), así que quince PID no caben: el plan se comprime y
+reparte el presupuesto por niveles — RPM, valores visibles en la pantalla activa,
+y fondo.
 
 Hay dos bucles de realimentación y conviene no confundirlos:
 
