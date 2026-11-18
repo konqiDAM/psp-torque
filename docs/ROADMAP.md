@@ -325,21 +325,23 @@ the layout per car, and let the app work out which car it is in. Full design in
   with a reason on a K-line car (`scan_can()` reads the ATDPN reply, no bus traffic), and
   `last=` in `settings.txt` reopens the app on the last driving screen, written once per
   change and on exit.
-- [ ] **U3 - Preferences v2.** `version=2` line, `start` (a screen name or `last`), `last`,
-  `hidden`, and per-vehicle keys `v.<id>.<key>` for layout and tacho. Existing keys keep
-  working as global defaults.
-- [x] **U4 - Vehicle profiles.** Done in `fase2.45` for detection and the numbers: the
-  table lives in `src/core/vehicle.c` with the MiTo, the MX-5 NB2 and a generic CAN and a
-  generic K-line row, matched on `ATDPN` plus the three masks, overridable with
-  `profile=` in `settings.txt`, and logged once per session with the evidence. On the MX-5
-  the tacho is 8000 with the red zone at 7000 and the cut at 7200; the MiTo and any
-  unrecognised car keep exactly what they had. Tests in `tests/test_vehicle.c`.
-- [ ] **U4b - Centre gauge and layout from the profile.** The table already names the
-  centre gauge (BOOST / MAF / LOAD) but the renderer still always draws boost, so the
-  MX-5 centre reads `N/D`. Next: draw MAF or LOAD there when that is what the car has, and
-  give each profile its own default slot layout.
-- [ ] **U5 - New screens in both languages.** Route the SONDA labels (and anything added
-  from here) through `tr()` instead of literals, so the screen follows the language setting like the rest.
+- [x] **U3 - Preferences v2.** Done in `fase2.47`. `version=2`, `start=` (a screen name
+  or `last`), `hidden=`, and `v.<id>.<key>` blocks so each car keeps its own slot items,
+  styles, telemetry series and tacho. Edits are captured into the connected car when there
+  is one and into the global layout otherwise, so a view arranged in the MX-5 cannot leak
+  into the MiTo. `PANTALLA INICIAL` is in the settings menu instead of being file-only.
+- [x] **U4b - Centre gauge and layout from the profile.** Done in `fase2.47`. A car with
+  no MAP draws MAF in the centre slot and load beside it; a car with neither draws load;
+  the telemetry chart follows the same rule. The choice is an overlay that only applies
+  while the view is still the factory one, so a view the user arranged is never touched.
+  MARCHA is a derived widget fed by the profile's gear ratios (km/h per 1000 rpm) and it
+  says N/D when the numbers do not add up.
+- [ ] **U5 - New screens in both languages.** FALLOS and the new picker strings already go
+  through `tr()`; the SONDA labels and the older screens still carry Spanish literals.
+- [x] **U6 - Selectable boot animation.** Done in `fase2.47`. `ANIMACION` is a three-way
+  choice: none (straight to the dashboard), the MiTo cloverleaf, or a new MX-5 roadster in
+  `src/psp/splash_mx5.c` with pop-up lights opening and the word mark. Old settings keep
+  their meaning.
 
 Criterion: on the MX-5 the bar shows four driving screens, SNIFFER is not offered, the
 layout is the MX-5's own, the app opens on the preferred screen, and the log names the car

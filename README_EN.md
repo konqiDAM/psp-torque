@@ -147,7 +147,7 @@ It opens on the driving screen it was left on. The choice is written to
 `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` as `last=`, once per change and once on exit.
 If it was left on a tool screen it opens GENERAL instead.
 
-## The seven screens
+## The screens
 
 | Screen | Content |
 |---|---|
@@ -155,7 +155,8 @@ If it was left on a tool screen it opens GENERAL instead.
 | **MOTOR** | Tile grid: MAP (or MAF), BOOST, ECT, IAT, accelerator, throttle/load, voltage, oil and fuel. Unavailable boxes are compacted away — they leave no gaps. |
 | **DIAG** | Advanced read-only diagnostics: STFT, LTFT, timing, O₂ voltages, fuel, voltage, distance with MIL and battery voltage. |
 | **TELEM** | A 5-series chart plus session max/min values. |
-| **MODULOS** | OBD‑II and UDS ECU discovery. Press `X` to scan. |
+| **MODULOS** | OBD‑II and UDS ECU discovery. Press `X` to scan. Works on K-line cars too, where it reads the OBD‑II masks and skips the CAN-only probe. |
+| **FALLOS** | Fault codes: lamp state, stored (03), pending (07) and permanent (0A) codes with their meaning, decoded locally. `X` reads, `CIRCLE` clears the screen — never the ECU. |
 | **SNIFFER** | Capture of all CAN bus traffic. `X` starts or stops it. |
 | **INFO** | What each parameter means, with the standard PID it comes from. |
 

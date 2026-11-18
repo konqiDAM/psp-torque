@@ -149,7 +149,7 @@ Se abre en la pantalla de conducción en la que se quedó. La elección se guard
 `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` como `last=`, una vez por cambio y otra al
 salir. Si se quedó en una herramienta, abre GENERAL.
 
-## Las siete pantallas
+## Las pantallas
 
 | Pantalla | Contenido |
 |---|---|
@@ -157,7 +157,7 @@ salir. Si se quedó en una herramienta, abre GENERAL.
 | **MOTOR** | Rejilla de tiles: MAP (o MAF), BOOST, ECT, IAT, acelerador, mariposa/load, tensión, aceite y combustible. Las cajas no disponibles se compactan: no dejan huecos. |
 | **DIAG** | Diagnóstico avanzado de solo lectura: STFT, LTFT, avance, tensiones O₂, combustible, voltaje, distancia con MIL y voltaje de batería. |
 | **TELEM** | Gráfica de 5 series a la vez + máximos/mínimos de sesión. |
-| **MODULOS** | Descubrimiento de centralitas OBD‑II y UDS. `X` lanza el escaneo. |
+| **MODULOS** | Descubrimiento de centralitas OBD‑II y UDS. `X` lanza el escaneo. Funciona también en coches de K-line, donde lee las máscaras OBD‑II y se salta el sondeo que es solo CAN. |
 | **SNIFFER** | Captura de todo el tráfico CAN del bus. `X` inicia o detiene. |
 | **INFO** | Qué es cada parámetro, con su PID estándar de origen. |
 
