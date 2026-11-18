@@ -118,15 +118,34 @@ change the code.
 
 | Button | Action |
 |---|---|
-| `L` / `R` / `◀` / `▶` | Change screen |
-| `START` or `SELECT` | Open / close the settings menu |
+| `L` / `R` / `◀` / `▶` | Change driving screen (GENERAL, MOTOR, DIAG, TELEM) |
+| `SELECT` | Open / close the screen picker |
+| `START` | Open / close the settings menu |
 | `TRIANGLE` | Reconnect using the saved WiFi profile |
 | `SQUARE` | Open the PSP WiFi dialog and reconnect |
 | `X` or `START` | Skip the boot animation · confirm · leave demo mode |
 | `L` + `R` (1.5 s) | Toggle **demo mode** |
 | `CIRCLE` | Cancel a running scan · clear the learned boost peak |
 
-To quit: `START` → `SALIR` → `X`.
+To quit: `START` → `X` on `SALIR`.
+
+From a tool screen, `L`/`R` goes back to GENERAL.
+
+## The screen picker
+
+`SELECT` opens a full list of the eight screens with one line of purpose each. Up and
+down move, `X` or `START` opens the chosen screen, `SELECT` or `CIRCLE` closes the list.
+Screens the car cannot use are greyed with the reason: on a pre-CAN car, MODULOS and
+SNIFFER need CAN and stay out of reach.
+
+The bar and `L`/`R` carry only the four driving screens. From a tool the bar shows the
+screen name and `L/R: VOLVER`, so the way back is always on screen.
+
+## Where the app starts
+
+It opens on the driving screen it was left on. The choice is written to
+`ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` as `last=`, once per change and once on exit.
+If it was left on a tool screen it opens GENERAL instead.
 
 ## The seven screens
 

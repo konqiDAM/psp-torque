@@ -46,6 +46,23 @@ make PSPDEV=/root/pspdev
 - The output is `EBOOT.PBP` in the repository root, with a `PARAM.SFO` generated at
   `MEMSIZE=2` (the pspdev default).
 
+### Building on a machine that is not this one
+
+Everything needed is in the repository and on GitHub, so a fresh machine (cloud or
+otherwise) starts with a clone and the toolchain:
+
+```sh
+git clone https://github.com/konqiDAM/psp-torque.git
+cd psp-torque
+git checkout feat/sonda-diagnostico     # the branch under development
+# toolchain as in section 1, then:
+export PATH=/root/pspdev/bin:$PATH
+make PSPDEV=/root/pspdev && make -C tests clean all
+```
+
+The build needs nothing from the Windows machine: no `/mnt/c`, no PSP, no PPSSPP. Only
+the toolchain tarball and the clone. `make -C tests` prints `OK: todas las pruebas pasan`.
+
 ## 3. Core tests
 
 These need no PSP toolchain, only a host compiler:

@@ -119,15 +119,35 @@ si quieres tocar el código.
 
 | Botón | Acción |
 |---|---|
-| `L` / `R` / `◀` / `▶` | Cambiar de pantalla |
-| `START` o `SELECT` | Abrir / cerrar el menú de ajustes |
+| `L` / `R` / `◀` / `▶` | Cambiar de pantalla de conducción (GENERAL, MOTOR, DIAG, TELEM) |
+| `SELECT` | Abrir / cerrar el selector de pantallas |
+| `START` | Abrir / cerrar el menú de ajustes |
 | `TRIANGLE` | Reconectar con el perfil WiFi guardado |
 | `SQUARE` | Abrir el diálogo WiFi de la PSP y reconectar |
 | `X` o `START` | Saltar la animación de arranque · confirmar · salir del modo demo |
 | `L` + `R` (1,5 s) | Activar / desactivar el **modo demo** |
 | `CIRCLE` | Cancelar un escaneo en curso · borrar el máximo de turbo aprendido |
 
-Para salir de la aplicación: `START` → `SALIR` → `X`.
+Para salir de la aplicación: `START` → `X` sobre `SALIR`.
+
+Desde una pantalla de herramientas, `L`/`R` vuelve a GENERAL.
+
+## El selector de pantallas
+
+`SELECT` abre la lista completa de las ocho pantallas con una línea de para qué sirve
+cada una. Arriba y abajo mueven, `X` o `START` abre la elegida, `SELECT` o `CIRCLE`
+cierra la lista. Las pantallas que el coche no puede usar salen en gris con el motivo:
+en un coche anterior a CAN, MODULOS y SNIFFER necesitan CAN y no se ofrecen.
+
+La barra y `L`/`R` llevan solo las cuatro pantallas de conducción. Desde una herramienta
+la barra dice el nombre de la pantalla y `L/R: VOLVER`, así que la vuelta está siempre a
+la vista.
+
+## Dónde arranca
+
+Se abre en la pantalla de conducción en la que se quedó. La elección se guarda en
+`ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` como `last=`, una vez por cambio y otra al
+salir. Si se quedó en una herramienta, abre GENERAL.
 
 ## Las siete pantallas
 
