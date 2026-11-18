@@ -108,21 +108,30 @@ static void test_capacity_estimator(void)
 {
     float c = PROFILE_LINK_CLASS_KLINE;
 
-    /* Entrego 1.4 de los 1.87 pedidos: la capacidad real es 1.4. */
+    /* El plan pide el 85% de la capacidad, asi que entregar menos de eso
+     * es lo normal y no un enlace caido: con 1,4 de 1,87 (75%) no se
+     * recorta. Es el caso que hacia oscilar el plan en la MX-5. */
     c = obd_capacity_next(c, 1.4f, 1.87f, 2.2f);
-    CHECK_NEAR(c, 1.4, 0.01);
+    CHECK_NEAR(c, PROFILE_LINK_CLASS_KLINE, 0.01);
+
+    /* Por debajo del 70% de lo pedido el enlace si falla: la capacidad es
+     * lo entregado. */
+    c = obd_capacity_next(c, 1.2f, 1.87f, 2.2f);
+    CHECK_NEAR(c, 1.2, 0.01);
 
     /* Sostuvo lo pedido: sube un 10%, sin pasar del techo. */
-    c = obd_capacity_next(c, 1.4f, 1.4f, 2.2f);
+    c = obd_capacity_next(1.4f, 1.4f, 1.4f, 2.2f);
     CHECK_NEAR(c, 1.54, 0.01);
     for (int i = 0; i < 20; i++) {
         c = obd_capacity_next(c, c, c, 2.2f);
     }
     CHECK(c <= 2.2f + 0.001f);
 
-    /* Zona muerta: entrego el 90% de lo pedido, ni sube ni baja. */
+    /* Zona muerta: entrego entre el 70% y el 97% de lo pedido, ni sube ni
+     * baja. */
     float before = 1.5f;
     CHECK_NEAR(obd_capacity_next(before, 1.35f, 1.5f, 2.2f), before, 0.001);
+    CHECK_NEAR(obd_capacity_next(before, 1.10f, 1.5f, 2.2f), before, 0.001);
 
     /* Sin datos, se queda como esta. */
     CHECK_NEAR(obd_capacity_next(1.5f, 0.0f, 1.5f, 2.2f), 1.5f, 0.001);

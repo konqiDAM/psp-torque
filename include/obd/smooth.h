@@ -34,4 +34,13 @@ void obd_smooth_reset(obd_smooth *s);
 /* Aplica el filtro a una muestra y devuelve el valor suavizado. */
 float obd_smooth_apply(obd_smooth *s, float v, uint32_t ts);
 
+/* Paso de presentacion: mueve el valor mostrado hacia `target` con la
+ * constante de tiempo `tau_ms`, usando el tiempo transcurrido desde la
+ * llamada anterior. Se llama una vez por fotograma, no por muestra, que
+ * es lo que convierte un escalon cada cuatro segundos en una aguja que
+ * se mueve. Con dt = 0 (varias lecturas del mismo valor en el mismo
+ * fotograma) no cambia nada. */
+float obd_smooth_step(obd_smooth *s, float target, uint32_t now,
+                      uint32_t tau_ms);
+
 #endif

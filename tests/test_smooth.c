@@ -97,6 +97,40 @@ static void test_salto_grande(void)
     CHECK(v > 4900.0f);
 }
 
+/* El paso de presentacion mueve el valor en el tiempo: es lo que hace
+ * que la aguja no salte cuando llega la muestra. */
+static void test_paso_de_presentacion(void)
+{
+    obd_smooth s;
+    obd_smooth_reset(&s);
+
+    /* Primer paso: se coloca en el objetivo, no arranca desde cero. */
+    CHECK_NEAR(obd_smooth_step(&s, 3000.0f, 1000u, 300u), 3000.0, 0.001);
+
+    /* Un fotograma de 16 ms con tau 300 avanza poco. */
+    float v = obd_smooth_step(&s, 4000.0f, 1016u, 300u);
+    CHECK(v > 3000.0f);
+    CHECK(v < 3100.0f);
+
+    /* En un tau recorre el 63% del camino. */
+    v = obd_smooth_step(&s, 4000.0f, 1016u + 300u, 300u);
+    CHECK(v > 3500.0f);
+    CHECK(v < 3700.0f);
+
+    /* Y al final llega y se queda clavado: sin cola asintotica. */
+    uint32_t t = 1016u + 300u;
+    for (int i = 0; i < 200; i++) {
+        t += 16u;
+        v = obd_smooth_step(&s, 4000.0f, t, 300u);
+    }
+    CHECK_NEAR(v, 4000.0, 0.001);
+
+    /* Dos lecturas en el mismo fotograma no avanzan el estado. */
+    float a = obd_smooth_step(&s, 5000.0f, t + 16u, 300u);
+    float b = obd_smooth_step(&s, 5000.0f, t + 16u, 300u);
+    CHECK_NEAR(a, b, 0.0001);
+}
+
 void test_smooth(void)
 {
     test_alpha_tau();
@@ -105,4 +139,5 @@ void test_smooth(void)
     test_convergencia_con_tau();
     test_retraso_independiente_de_la_cadencia();
     test_salto_grande();
+    test_paso_de_presentacion();
 }

@@ -1116,6 +1116,9 @@ static void connect_yield(void);
 /* Scheduler; se define mas abajo. */
 static void build_scheduler(void);
 
+/* Estado del suavizado de presentacion; se define mas abajo. */
+static void disp_reset(void);
+
 /* ------------------------------------------------------------------ */
 /* Log: pantalla + archivo, con sincronizacion periodica.              */
 /* ------------------------------------------------------------------ */
@@ -1298,6 +1301,9 @@ static void settings_apply(void)
         obd_smooth_reset(&g_ema_speed);
         obd_smooth_reset(&g_ema_thr);
     }
+    /* Al cambiar el ajuste, el valor presentado no puede quedarse a medio
+     * camino del anterior. */
+    disp_reset();
     if (g_link_connected) {
         build_scheduler();
         obd_sched_reset_due(&g_sched, now_ms());
@@ -2038,6 +2044,46 @@ static uint32_t sample_valid_ms(uint8_t pid)
     return 6000u;
 }
 
+/* Presentacion: el valor que se pinta no salta al llegar la muestra,
+ * se mueve hacia ella en cada fotograma. En este enlace un PID vuelve
+ * cada 1-10 s, asi que sin esto la aguja da un salto cada varios segundos
+ * y el resto del tiempo esta quieta, que es lo que parece "lento" aunque
+ * el dato sea correcto. Es solo presentacion: la antiguedad se sigue
+ * midiendo con la marca de la muestra, no con esto. */
+static obd_smooth g_disp[256];
+
+static void disp_reset(void)
+{
+    for (int i = 0; i < 256; i++) {
+        obd_smooth_reset(&g_disp[i]);
+    }
+}
+
+/* Un tercio del periodo que el plan da a ese PID, entre 120 y 800 ms: el
+ * RPM (1 s) llega en ~300 ms y el MAF (10 s) tarda ~2 s en recorrer el
+ * escalon entero, en vez de aparecer de golpe. */
+static uint32_t disp_tau_ms(uint8_t pid)
+{
+    uint32_t p = 0;
+    for (int i = 0; i < g_sched.count; i++) {
+        if (g_sched.items[i].pid == pid) {
+            p = g_sched.items[i].period_ms;
+            break;
+        }
+    }
+    if (p == 0u) {
+        return 250u;
+    }
+    uint32_t t = p / 3u;
+    if (t < 120u) {
+        t = 120u;
+    }
+    if (t > 800u) {
+        t = 800u;
+    }
+    return t;
+}
+
 static int sample_value(uint8_t pid, uint32_t now, float *out)
 {
     const obd_sample *sample = obd_store_get(&g_store, pid);
@@ -2047,7 +2093,12 @@ static int sample_value(uint8_t pid, uint32_t now, float *out)
     if ((uint32_t)(now - sample->ts_ms) > sample_valid_ms(pid)) {
         return 0;
     }
-    *out = sample->value;
+    if (!g_cfg.smooth) {
+        *out = sample->value;
+        return 1;
+    }
+    *out = obd_smooth_step(&g_disp[pid], sample->value, now,
+                           disp_tau_ms(pid));
     return 1;
 }
 
@@ -3591,6 +3642,7 @@ static int connect_network_and_elm(Target *targets, int *target_count,
     g_no_data_streak = 0;
     g_sample_iv_ms = 0;
     g_last_sample_ms = 0;
+    disp_reset();
 
     obd_store_init(&g_store);
     boost_init(&g_boost, PROFILE_BARO_FALLBACK_KPA);

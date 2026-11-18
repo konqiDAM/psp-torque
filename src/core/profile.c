@@ -229,8 +229,13 @@ float obd_capacity_next(float current, float rate, float demand, float ceiling)
     }
 
     /* El enlace no sostuvo lo pedido: la capacidad es lo entregado. Solo
-     * recorta, nunca sube, para que un pico no dispare el plan. */
-    if (rate < demand * 0.85f) {
+     * recorta, nunca sube, para que un pico no dispare el plan.
+     *
+     * El umbral es 0,70 y no 0,85 porque el plan ya pide solo el 85% de la
+     * capacidad (PROFILE_LINK_UTILIZATION), asi que un enlace sano entrega
+     * ~0,85 de lo pedido: con el liston en 0,85 cada ventana recortaba y el
+     * plan oscilaba entre 2,20 y 1,40 req/s en la MX-5 (phase1_008.log). */
+    if (rate < demand * 0.70f) {
         float next = (rate < current) ? rate : current;
         if (next > ceiling) {
             next = ceiling;

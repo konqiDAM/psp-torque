@@ -20,6 +20,35 @@ void obd_smooth_reset(obd_smooth *s)
     s->initialized = 0;
 }
 
+float obd_smooth_step(obd_smooth *s, float target, uint32_t now,
+                      uint32_t tau_ms)
+{
+    if (!s->initialized) {
+        s->value = target;
+        s->initialized = 1;
+        s->last_ts = now;
+        return s->value;
+    }
+
+    uint32_t dt = now - s->last_ts;
+    s->last_ts = now;
+    if (dt == 0u || tau_ms == 0u) {
+        return s->value;
+    }
+
+    float a = 1.0f - expf(-(float)dt / (float)tau_ms);
+    s->value += (target - s->value) * a;
+
+    /* Cerca del objetivo se pega: sin esto la cola asintotica deja el
+     * valor a un pelo del real durante minutos, y en un display eso se ve
+     * como un decimal que nunca cierra. */
+    float eps = fabsf(target) * 0.002f + 0.01f;
+    if (fabsf(target - s->value) <= eps) {
+        s->value = target;
+    }
+    return s->value;
+}
+
 float obd_smooth_apply(obd_smooth *s, float v, uint32_t ts)
 {
     if (!s->initialized) {
