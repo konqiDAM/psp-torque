@@ -144,6 +144,7 @@ static uint16_t g_hidden_mask = 0;  /* bits MODE_* que no se ofrecen (son 9) */
 /* Perfil detectado en esta sesion: clave de v.<id>.* y lo que decide si
  * la vista es de este coche o la global. */
 static char g_vehicle_id[24] = "";
+static char g_vehicle_name[24] = "";
 static char g_vbat[24] = "?";
 static char g_ssid[32] = "";
 static char g_ip[24] = "";
@@ -813,6 +814,9 @@ static void layout_apply_for_car(void)
     memcpy(g_tel_item, g_global_tel_item, sizeof(g_tel_item));
 
     vehicle_prefs *p = car_prefs_for(g_vehicle_id, 0);
+    if (p != NULL && p->has_tacho && p->rpm_max >= 4000) {
+        g_cfg.rpm_max = p->rpm_max;
+    }
     if (p != NULL && p->has_layout) {
         memcpy(g_slot_item, p->slot_item, sizeof(g_slot_item));
         memcpy(g_slot_style, p->slot_style, sizeof(g_slot_style));
@@ -1783,7 +1787,7 @@ static void settings_save(void)
     char line[72];
     for (int c = 0; c < g_car_prefs_count; c++) {
         const vehicle_prefs *vp = &g_car_prefs[c];
-        if (!vp->has_layout) {
+        if (!vp->has_layout && !vp->has_tacho) {
             continue;
         }
         for (int k = 0; k < DASH_SLOTS; k++) {
@@ -1801,6 +1805,13 @@ static void settings_save(void)
         for (int k = 0; k < TEL_SLOTS; k++) {
             int n = snprintf(line, sizeof(line), "v.%s.tel%d_item=%d\n",
                              vp->id, k, vp->tel_item[k]);
+            if (n > 0 && n < (int)sizeof(line)) {
+                sceIoWrite(fd, line, (unsigned)n);
+            }
+        }
+        if (vp->has_tacho) {
+            int n = snprintf(line, sizeof(line), "v.%s.rpm_max=%d\n",
+                             vp->id, vp->rpm_max);
             if (n > 0 && n < (int)sizeof(line)) {
                 sceIoWrite(fd, line, (unsigned)n);
             }
@@ -3058,6 +3069,7 @@ static void vehicle_detect(void)
         /* Sin identidad no hay vista de coche: lo que se edite va a la
          * global, no a las preferencias del coche anterior. */
         g_vehicle_id[0] = '\0';
+        g_vehicle_name[0] = '\0';
         layout_apply_for_car();
         log_file_printf("Vehiculo: sin perfil (proto %s, mascaras %08X/%08X/%08X)\n",
                         g_proto, g_mask1, g_mask2, g_mask3);
@@ -3094,6 +3106,8 @@ static void vehicle_detect(void)
     /* Identidad para las preferencias por coche y su vista, si tiene. */
     snprintf(g_vehicle_id, sizeof(g_vehicle_id), "%s",
              p->generic ? "" : p->id);
+    snprintf(g_vehicle_name, sizeof(g_vehicle_name), "%s",
+             p->generic ? "" : p->name);
     layout_apply_for_car();
 
     log_file_printf("Vehiculo: %s (%s, proto %s, mascaras %08X/%08X/%08X)"
@@ -7630,6 +7644,10 @@ static void draw_picker(void)
     gfx_rect(0.0f, 0.0f, (float)GFX_W, (float)GFX_H, QV_BG);
     gfx_rect(0.0f, 0.0f, (float)GFX_W, 26.0f, QV_PANEL);
     gfx_text(8, 8, tr("PANTALLAS"), QV_TEXT, 1);
+    if (g_vehicle_name[0] != '\0') {
+        gfx_text(8 + gfx_text_width(tr("PANTALLAS"), 1) + 10, 8,
+                 g_vehicle_name, QV_CYAN, 1);
+    }
     gfx_text_right(GFX_W - 8, 8, tr("X: ABRIR   SELECT: CERRAR"), QV_DIM, 1);
     gfx_rect(8.0f, 30.0f, (float)GFX_W - 16.0f, 1.0f, QV_TRACK);
 
@@ -9014,6 +9032,14 @@ static int handle_settings_input(unsigned int pressed)
              * hasta la proxima conexion, cuando se vuelve a detectar. */
             g_cfg.rpm_max = (int)tach_max_rpm() + dir * 500;
             vehicle_release_tacho();
+            /* Se recuerda por coche: el MiTo y la MX-5 no comparten escala. */
+            if (g_vehicle_id[0] != '\0') {
+                vehicle_prefs *vp = car_prefs_for(g_vehicle_id, 1);
+                if (vp != NULL) {
+                    vp->rpm_max = g_cfg.rpm_max;
+                    vp->has_tacho = 1;
+                }
+            }
             if (g_cfg.rpm_max < 4000) g_cfg.rpm_max = 4000;
             if (g_cfg.rpm_max > 9000) g_cfg.rpm_max = 9000;
             if (g_cfg.shift_rpm > g_cfg.rpm_max) {
