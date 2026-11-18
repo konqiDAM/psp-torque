@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.58 2026-11-18 GENERAL con avance, TELEM con avance y mariposa, grafico suavizado, leyenda legible"
+#define BUILD_TAG "fase2.59 2026-11-18 avance y mariposa con rango propio en el plan, series migradas, tiles legibles"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -868,9 +868,20 @@ static int layout_is_factory(void)
             return 0;
         }
     }
-    for (int i = 0; i < TEL_SLOTS; i++) {
-        if (g_tel_item[i] != fit_tel[i] &&
-            g_tel_item[i] != fit_tel_old[i]) {
+    {
+        /* Juego completo: comparar indice a indice aceptaba mezclas de los
+         * dos, y una vista a medias se tomaba por la de fabrica. */
+        int new_ok = 1;
+        int old_ok = 1;
+        for (int i = 0; i < TEL_SLOTS; i++) {
+            if (g_tel_item[i] != fit_tel[i]) {
+                new_ok = 0;
+            }
+            if (g_tel_item[i] != fit_tel_old[i]) {
+                old_ok = 0;
+            }
+        }
+        if (!new_ok && !old_ok) {
             return 0;
         }
     }
@@ -1819,6 +1830,30 @@ static void settings_load(void)
         }
     }
 
+    /* Las series de fabrica cambiaron en fase2.58 (avance y mariposa en vez
+     * de refrigerante y velocidad). Una tarjeta que tenga el juego viejo
+     * guardado no lo cambia sola, porque la deteccion de fabrica acepta los
+     * dos: se migra aqui, una vez, y solo si son exactamente las viejas.
+     * Si el usuario las habia tocado, no se toca nada. */
+    {
+        static const int old_tel[TEL_SLOTS] = { W_RPM, W_BOOST, W_ECT,
+                                                W_SPEED, W_OFF };
+        static const int new_tel[TEL_SLOTS] = { W_RPM, W_BOOST, W_TIMING,
+                                                W_THR, W_OFF };
+        int is_old = 1;
+        for (int i = 0; i < TEL_SLOTS; i++) {
+            if (g_tel_item[i] != old_tel[i]) {
+                is_old = 0;
+            }
+        }
+        if (is_old) {
+            for (int i = 0; i < TEL_SLOTS; i++) {
+                g_tel_item[i] = new_tel[i];
+            }
+            log_file_printf("Series de telemetria: migradas al juego nuevo\n");
+        }
+    }
+
     settings_apply();
 
     /* La vista del fichero es la global: es la que se usa cuando el coche
@@ -2254,6 +2289,10 @@ static void demo_reset(void)
     g_hist_count = 0;
     g_hist_pos = 0;
     g_hist_last = 0;
+    /* Las marcas de validez tambien: sin esto, series_stats recorria las
+     * 180 casillas y las casillas de MAX/MIN ensenaban los extremos de la
+     * sesion anterior hasta que el anillo daba la vuelta. */
+    memset(g_hist_valid, 0, sizeof(g_hist_valid));
     g_fx_speed_prev = 0.0f;
     g_fx_speed_ts = 0;
     g_fx_accel = 0.0f;
@@ -3560,16 +3599,42 @@ static void apply_screen_schedule(uint32_t now)
         }
     }
 
-    int rank = 0;
+    /* Rango de reparto, primero lo que se PINTA y despues lo visible por
+     * mascara del perfil. Antes el rango salia solo de la mascara, asi que
+     * el avance (0x0E) y la mariposa (0x11) — que el perfil marca como
+     * DIAG — caian al fondo; con el plan comprimido del K-line les tocaba
+     * el periodo de fondo, 60 s, y en pantalla salian N/D justo despues de
+     * ponerlos en el GENERAL y en el TELEM. Los no soportados no cogen
+     * rango. */
+    int rank_of[OBD_SCHED_MAX];
+    memset(rank_of, 0, sizeof(rank_of));
+    {
+        int rank = 0;
+        for (int pass = 0; pass < 2; pass++) {
+            for (int i = 0; i < g_sched.count && i < OBD_SCHED_MAX; i++) {
+                uint8_t pid = g_sched.items[i].pid;
+                if (pid == 0x0C || g_sched.items[i].supported == 2) {
+                    continue;
+                }
+                int drawn = obd_forced_set_has(&forced, pid);
+                if ((pass == 0) != (drawn != 0)) {
+                    continue;
+                }
+                if (!drawn &&
+                    (obd_profile_visible_mask(pid) & mode_mask) == 0) {
+                    continue;
+                }
+                rank_of[i] = ++rank;
+            }
+        }
+    }
+
     for (int i = 0; i < g_sched.count; i++) {
         uint8_t pid = g_sched.items[i].pid;
         uint8_t mask = obd_profile_visible_mask(pid);
         int visible = (mask & mode_mask) != 0 ||
                       obd_forced_set_has(&forced, pid);
-        int my_rank = 0;
-        if (visible && pid != 0x0C) {
-            my_rank = ++rank;
-        }
+        int my_rank = rank_of[i];
         uint16_t period = obd_plan_period(&g_link_plan, pid, visible,
                                           my_rank, value_count);
         if (period == 0) {
@@ -6807,11 +6872,17 @@ static int pid_supported(uint8_t pid)
     if (pid >= 0x01 && pid <= 0x20) {
         return g_mask1 != 0 && obd_mask_supports(g_mask1, pid);
     }
+    /* obd_mask_supports indexa 1..32 dentro de su bloque: pasarle el PID
+     * global hacia que tension, combustible, baro y MIL no se pudieran
+     * elegir nunca, aunque la ECU los declarase (el MiTo declara 0x42,
+     * 0x2F y 0x33). */
     if (pid >= 0x21 && pid <= 0x40) {
-        return g_mask2 != 0 && obd_mask_supports(g_mask2, pid);
+        return g_mask2 != 0 &&
+               obd_mask_supports(g_mask2, (uint8_t)(pid - 0x20));
     }
     if (pid >= 0x41 && pid <= 0x60) {
-        return g_mask3 != 0 && obd_mask_supports(g_mask3, pid);
+        return g_mask3 != 0 &&
+               obd_mask_supports(g_mask3, (uint8_t)(pid - 0x40));
     }
     return 0;
 }
@@ -7030,12 +7101,11 @@ static void draw_tel_stat(int item, float x, float y, float w, float h)
         return;
     }
 
-    /* Titulo compacto: "AVZ 10 deg" en 88 px; con "MAX" delante y la
-     * unidad detras no cabia y se salia del panel. */
+    /* "AVZ MAX" cabe en 88 px y deja claro que el numero grande es el
+     * maximo de la sesion; la unidad va en la linea del minimo. */
     char title[28];
-    snprintf(title, sizeof(title), "%s %s", tel_short(item),
-             tel_unit(item));
-    gfx_text((int)x + 6, (int)y + 4, title, QV_TEXT, 1);
+    snprintf(title, sizeof(title), "%s MAX", tel_short(item));
+    gfx_text((int)x + 6, (int)y + 4, title, QV_DIM, 1);
 
     float mn, mx;
     int n;
@@ -7051,8 +7121,11 @@ static void draw_tel_stat(int item, float x, float y, float w, float h)
         int big = (strlen(buf) <= 5) ? 2 : 1;
         gfx_text((int)x + 6, (int)y + 20, buf, tel_color(item), big);
         tel_print(item, mn, small, sizeof(small));
-        gfx_text((int)x + 6, (int)y + h - 12, tr("MIN"), QV_DIM, 1);
-        gfx_text((int)x + 34, (int)y + h - 12, small, QV_TEXT, 1);
+        char minline[28];
+        snprintf(minline, sizeof(minline), "%s %s", tr("MIN"),
+                 tel_unit(item));
+        gfx_text((int)x + 6, (int)y + h - 12, minline, QV_DIM, 1);
+        gfx_text((int)x + 52, (int)y + h - 12, small, QV_TEXT, 1);
     } else {
         gfx_text((int)x + 6, (int)y + 20, "N/D", QV_DIM, 2);
     }
@@ -7066,7 +7139,7 @@ static void draw_telemetry(void)
 
     qv_panel(px, py, pw, ph);
     gfx_text((int)px + 10, (int)py + 8, tr("TELEMETRIA"), QV_DIM, 1);
-    gfx_text((int)px + 90, (int)py + 8, tr("X: SERIES"), QV_DIM, 1);
+    gfx_text((int)px + 98, (int)py + 8, tr("X: SERIES"), QV_DIM, 1);
 
     /* Leyenda: un color y un nombre corto por serie activa. Cada entrada
      * ocupa lo que mide su texto mas el cuadro de color: con un paso fijo
@@ -7081,7 +7154,7 @@ static void draw_telemetry(void)
                 continue;
             }
             const char *nm = tel_short(item);
-            float w = 8.0f + 4.0f + (float)gfx_text_width(nm, 1) + 10.0f;
+            float w = 8.0f + 4.0f + (float)gfx_text_width(nm, 1) + 6.0f;
             if (lx + w > px + pw - 8.0f) {
                 break;
             }
@@ -9939,6 +10012,10 @@ static void run_dashboard(Target *targets, int target_count)
     g_hist_count = 0;
     g_hist_pos = 0;
     g_hist_last = 0;
+    /* Las marcas de validez tambien: sin esto, series_stats recorria las
+     * 180 casillas y las casillas de MAX/MIN ensenaban los extremos de la
+     * sesion anterior hasta que el anillo daba la vuelta. */
+    memset(g_hist_valid, 0, sizeof(g_hist_valid));
     g_session_start_ms = start;
     g_exit_request = 0;
 
