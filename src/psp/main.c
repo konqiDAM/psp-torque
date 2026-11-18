@@ -250,10 +250,14 @@ static int mode_is_driving(int mode)
  * protocolo (antes de conectar) no se oculta nada. */
 static int screen_available(int mode)
 {
-    if (mode != MODE_MODULES && mode != MODE_SNIFFER) {
+    /* MODULOS funciona en las dos clases: en CAN con el sondeo UDS y en
+     * K-line con las mascaras de OBD-II, que es todo lo que hay. SNIFFER
+     * decodifica tramas CAN y en un bus K-line no tiene nada que capturar. */
+    if (mode != MODE_SNIFFER) {
         return 1;
     }
-    if (g_proto[0] == 0 || strcmp(g_proto, "?") == 0) {
+    if (g_proto[0] == 0 || strcmp(g_proto, "?") == 0 ||
+        strcmp(g_proto, "A0") == 0) {
         return 1;
     }
     return scan_can();
@@ -265,10 +269,7 @@ static const char *screen_reason(int mode)
     if (screen_available(mode)) {
         return "";
     }
-    if (mode == MODE_SNIFFER) {
-        return tr("Solo CAN");
-    }
-    return tr("K-line: pendiente");
+    return tr("Solo CAN");
 }
 
 /* Orden del selector: primero lo que se usa conduciendo, despues las
@@ -3933,7 +3934,16 @@ static void run_scan(int sock)
     scan_refresh_proto(sock, "escaneo");
     snprintf(g_scan_proto, sizeof(g_scan_proto), "%s", g_proto);
 
-    scan_uds(sock);
+    /* El sondeo UDS pide cabeceras CAN concretas (ATSH 7E0, 3E00, 22F1xx):
+     * en un coche de K-line eso no significa nada y ademas sale de lo que
+     * la app promete (01/02/03/06/07/09/0A y comandos AT). Ahi el escaneo
+     * se queda en las mascaras de OBD-II, que es lo que identifica a la
+     * centralita en ISO 9141-2. */
+    if (scan_can()) {
+        scan_uds(sock);
+    } else {
+        log_file_printf("Escaneo: K-line, sondeo UDS omitido\n");
+    }
 
     scan_status("RESTAURANDO ELM327");
     scan_restore(sock);
