@@ -207,6 +207,34 @@ Three things settled and two found:
   refreshes each one every 6–9 s. A sample now lasts three of its own cycles, floor
   6 s, cap 20 s.
 
+## 3e. Third session, `phase1_008` (fase2.54)
+
+156 s parked and idling, clean exit, no drive.
+
+```
+Fin de sesion: peticiones=290 datos=290 nd=0 to=0
+Vehiculo: Mazda MX-5 NB2 tacometro=8000 rojo=7000 corte=7200
+Enlace: 1.54 req/s medidas, plan 1.31 req/s (comprimido)
+```
+
+| Reading | Before (`007`, fase2.52) | After (`008`, fase2.54) |
+|---|---|---|
+| coolant N/D | 45 of 127 samples | **0 of 77** |
+| speed N/D | 53 of 127 | **0 of 77** |
+| intake N/D | 57 of 127 | 11 of 77 |
+| coolant refresh | every 7.5 s | every 4.2 s |
+| speed refresh | every 8.8 s | every 4.4 s |
+| rpm refresh | every 1.12 s | every 1.06 s |
+
+Three fixes are visible in that table: a sample now stays valid for three of its own
+cycles instead of a flat 6 s, the capacity estimator no longer ratchets the plan down,
+and with more of the budget reaching the slower PIDs they refresh almost twice as often.
+
+One knob left open at the time: the estimator then sawtoothed (2.20 -> 1.40 -> 1.54 ->
+1.86 -> 2.05 -> 2.20) because the cut threshold (0.85 of the request) sat exactly on what
+a healthy link delivers when the plan asks for 85 % of capacity. `fase2.55` moved it to
+0.70. Not yet confirmed in a log.
+
 ## 4. Design consequences
 
 1. **`BOOST` cannot exist on this car.** `BOOST = MAP − barometric` and neither `0B`
@@ -232,8 +260,17 @@ from 383 to 500 ms, nine timeouts accumulated, and the automatic reconnect recov
 the first attempt. On the second, all three attempts failed and the session stayed
 `offline` to the end.
 
-It is not yet known whether that is the adapter (the clone's TCP stack), the PSP's WiFi
-power saving, or the car. See PRUEBAS_PENDIENTES, T4.
+That question is now closed. The 55 `NO DATA` replies at the end of `phase1_006` looked
+like a third drop, but `phase1_008` ran 156 s and `phase1_007` 255 s with **zero**
+`NO DATA`, zero timeouts, zero reconnects and zero drops, and in both the owner switched
+the engine off *after* the app had exited cleanly. The link does not fail on its own; the
+silence in `006` was the ignition going off while the app kept polling. The 500 ms
+request timeout was a real defect (it caused the late-prompt desyncs that cost a request
+each time), and it is 1000 ms on K-line since `fase2.49`.
+
+Two mechanisms now cover the genuine failure modes: twenty consecutive `NO DATA` escalate
+to a reconnect (`fase2.49`), and the adapter stuck on `STOPPED` still escalates after
+eight replies (`fase2.44`).
 
 ## 6. How to repeat the probe
 

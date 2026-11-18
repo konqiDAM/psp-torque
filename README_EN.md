@@ -121,6 +121,7 @@ change the code.
 | `L` / `R` / `◀` / `▶` | Change driving screen (GENERAL, MOTOR, DIAG, TELEM) |
 | `SELECT` | Open / close the screen picker |
 | `START` | Open / close the settings menu |
+| `START` (hold 1.2 s) | Quit, including from screens that run their own loop (sniffer, FALLOS, scan) |
 | `TRIANGLE` | Reconnect using the saved WiFi profile |
 | `SQUARE` | Open the PSP WiFi dialog and reconnect |
 | `X` or `START` | Skip the boot animation · confirm · leave demo mode |
@@ -309,14 +310,20 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
   waits 2 ms instead of a full VBlank (16.7 ms). That wait used to add
   ~26 ms to every request and capped the link at 12.6 requests/s; now it
   delivers ~18. The draw cadence does not change: it still counts VBlanks.
-- **Rate calibrated against the link:** every PID's polling period is fitted
-  to the adapter's measured capacity (~18 requests/s with a WiFi ELM327 v1.5
-  clone). If the total demand exceeded it, the scheduler would saturate and
-  **every** gauge would lag. A core test computes that demand and fails if
-  it goes over budget.
-- **Smoothing with a fixed time constant:** the gauge filter has a 150 ms
-  delay regardless of the sampling rate, so the needle follows the throttle
-  without the 2.1 s lag of a fixed-factor filter.
+- **Two adaptive loops set the rate.** The first divides the link budget
+  between what the active screen shows and what it does not, and is recomputed
+  on every screen change and every 10 s. The second measures what the adapter
+  actually delivers and raises or lowers that budget. On CAN the ceiling is
+  ~18 requests/s; on the MX-5's K-line it is 2.5 (383 ms per request). A core
+  test computes the demand and fails if it goes over budget.
+- **Display interpolation:** between samples, the value being drawn moves
+  toward the latest measurement on every frame, with a time constant of a
+  third of that PID's period (120–800 ms). On a link that only answers once
+  every 4 s, the needle moves instead of jumping and then sitting still. It
+  never extrapolates: it only closes on measurements that arrived, and a
+  stale value still becomes `N/D`. Turned off by the **SUAVIZADO** setting.
+- **A 150 ms filter on the sample**, separate from the interpolation: it
+  removes noise from the measurement itself when it is stored.
 - **VBlank cadence:** drawing is synchronised with `sceDisplayGetVcount()`
   instead of with timers, and the number of VBlanks per frame adapts
   automatically to the CPU load.
@@ -378,7 +385,7 @@ These rules are the reason the project exists and they are not negotiable:
 - Polling rate and smoothing recalibrated against the real link. *(done)*
 - Vehicle profile editable from the PSP.
 - Session CSV export in long format.
-- Poll at high rate only what the visible screen needs.
+- Poll at high rate only what the visible screen needs. *(done)*
 - Support for more PSP models (PSP‑E1000 has no WiFi, PSP‑Street).
 - Manufacturer-specific profiles, always documented and validated.
 

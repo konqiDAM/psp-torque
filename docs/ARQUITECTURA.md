@@ -229,6 +229,26 @@ El filtro del núcleo (`obd_smooth`) usa constante de tiempo fija
 (`tau = 150 ms`): `alpha = 1 - exp(-dt/tau)`. El retardo es siempre `tau`,
 venga la cadencia como venga.
 
+### 5.5b Interpolación de presentación (fase2.55)
+
+El filtro anterior se aplica **al guardar la muestra**, así que entre dos
+muestras el valor está quieto: en CAN no se nota (un PID vuelve cada 330 ms),
+pero en el K-line de la MX-5 cada valor vuelve cada 1-10 s y la aguja daba un
+salto y se quedaba parada. Eso es lo que parece "lento" aunque el dato sea
+correcto.
+
+`sample_value()` aplica ahora `obd_smooth_step()` en cada fotograma: el valor
+pintado se mueve hacia la última medida con `tau = periodo/3` (120-800 ms), así
+que el RPM llega en ~300 ms y el MAF cruza un escalón de 10 s en unos dos
+segundos. Propiedades que mantiene:
+
+- Solo se acerca a medidas que han llegado: no extrapola.
+- La antigüedad y el `N/D` se miden con la marca de la muestra, no con esto.
+- `sample_value_raw()` es la lectura exacta, y es la que usan el log de estado y
+  los máximos: la evidencia no puede ser la animación.
+- Se reinicia al conectar y al cambiar el ajuste, para no arrastrar medio valor.
+- Se apaga con el ajuste `SUAVIZADO`.
+
 ### 5.6 Reparto del ancho de banda por pantalla (FASE F3)
 
 El enlace da ~12-14 peticiones/s, el planificador tiene 19 PID y **no todos
@@ -248,6 +268,25 @@ activa; fuera de ella se multiplican por 4 con tope de 30 s.
 
 `apply_screen_schedule()` (capa PSP) recalcula los periodos al cambiar de
 pantalla y deja pendientes de inmediato los PID que acaban de aparecer.
+
+### 5.6b Enlace lento: reparto y estimación de capacidad (FASE K2, fase2.53)
+
+Esa tabla está dimensionada para CAN. En K-line el techo real son **2,5
+peticiones/s** (383 ms por petición medidas en la MX-5), así que quince PID no
+caben: el plan se comprime y reparte el presupuesto por niveles — RPM, valores
+visibles en la pantalla activa, y fondo.
+
+Hay dos bucles de realimentación y conviene no confundirlos:
+
+1. **Reparto** (`obd_plan_init` + `obd_plan_period`): divide el presupuesto
+   entre lo que pide la pantalla activa. Se recalcula al cambiar de pantalla y
+   cada 10 s.
+2. **Capacidad** (`obd_capacity_next`): compara lo entregado con lo pedido y
+   sube un 10 % por ventana si sobra, o recorta si falta. El recorte está en el
+   70 % de lo pedido, no en el 85 %, porque el plan ya pide solo el 85 % de la
+   capacidad: con el listón en el 85 % un enlace sano se recortaba en cada
+   ventana y el plan oscilaba entre 2,20 y 1,40 req/s (visto en
+   `phase1_008.log`).
 Los huecos del GENERAL y las series de TELEMETRIA son configurables:
 cualquier PID puede acabar en pantalla, así que se fuerza su periodo base
 con un conjunto de bytes (`obd_forced_set`) que cubre todo el rango de

@@ -122,6 +122,7 @@ si quieres tocar el código.
 | `L` / `R` / `◀` / `▶` | Cambiar de pantalla de conducción (GENERAL, MOTOR, DIAG, TELEM) |
 | `SELECT` | Abrir / cerrar el selector de pantallas |
 | `START` | Abrir / cerrar el menú de ajustes |
+| `START` (mantener 1,2 s) | Salir de la aplicación, también desde las pantallas con bucle propio (sniffer, FALLOS, escaneo) |
 | `TRIANGLE` | Reconectar con el perfil WiFi guardado |
 | `SQUARE` | Abrir el diálogo WiFi de la PSP y reconectar |
 | `X` o `START` | Saltar la animación de arranque · confirmar · salir del modo demo |
@@ -313,15 +314,20 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
   bucle espera 2 ms en vez de un VBlank completo (16,7 ms). Antes, esa espera
   añadía ~26 ms a cada petición y limitaba el enlace a 12,6 peticiones/s;
   ahora da ~18. La cadencia de dibujo no cambia: sigue contando VBlanks.
-- **Cadencia calibrada contra el enlace:** los periodos de sondeo de cada PID
-  están ajustados a la capacidad medida del adaptador (~18 peticiones/s con
-  un clon ELM327 v1.5 por WiFi). Si la demanda total los superara, el
-  planificador se saturaría y **todos** los indicadores irían con retraso.
-  Un test del núcleo calcula esa demanda y falla si se pasa del presupuesto.
-- **Suavizado con constante de tiempo fija:** el filtro de los indicadores
-  tiene un retardo de 150 ms con independencia de la cadencia de muestreo,
-  así que la aguja sigue al acelerón sin los 2,1 s de retardo de un filtro
-  de factor fijo.
+- **Cadencia adaptativa, por dos bucles.** El primero reparte el presupuesto
+  del enlace entre lo que pide la pantalla activa y lo que no, y se recalcula
+  al cambiar de pantalla y cada 10 s. El segundo mide lo que el adaptador
+  entrega de verdad y sube o baja ese presupuesto. En CAN el techo son ~18
+  peticiones/s; en el K-line de la MX-5, 2,5 (383 ms por petición). Un test
+  del núcleo calcula la demanda y falla si se pasa del presupuesto.
+- **Interpolación de presentación:** entre dos muestras el valor que se pinta
+  se mueve hacia la última medida en cada fotograma, con una constante de
+  tiempo de un tercio del periodo de ese PID (120–800 ms). Con un enlace que
+  solo da una lectura cada 4 s, la aguja se mueve en vez de saltar y quedarse
+  quieta. No extrapola: solo se acerca a medidas que han llegado, y si el dato
+  envejece se sigue mostrando `N/D`. Se apaga con el ajuste **SUAVIZADO**.
+- **Filtro de 150 ms sobre la muestra**, aparte de la interpolación: quita el
+  ruido del propio dato en el momento de guardarlo.
 - **Cadencia por VBlank:** el dibujo se sincroniza con `sceDisplayGetVcount()`
   en lugar de con temporizadores, y el número de VBlanks por fotograma se
   ajusta solo según la carga de CPU.
@@ -387,7 +393,7 @@ Estas reglas son la razón de ser del proyecto y no se negocian:
 - Cadencia de sondeo y suavizado recalibrados contra el enlace real. *(hecho)*
 - Perfil de vehículo editable desde la PSP.
 - Exportación CSV de la sesión con formato largo.
-- Sondear en alta cadencia solo lo que la pantalla activa necesita.
+- Sondear en alta cadencia solo lo que la pantalla activa necesita. *(hecho)*
 - Soporte de mas de una PSP (PSP‑E1000 sin WiFi, PSP‑Street).
 - Perfiles específicos de fabricante, siempre documentados y validados.
 

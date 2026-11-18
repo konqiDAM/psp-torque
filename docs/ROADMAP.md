@@ -347,6 +347,51 @@ Criterion: on the MX-5 the bar shows four driving screens, SNIFFER is not offere
 layout is the MX-5's own, the app opens on the preferred screen, and the log names the car
 and the masks it was recognised by. On the MiTo nothing changes except the bar.
 
+## Fase 7 - Primeras sesiones reales con el MX-5
+
+Objetivo: que el cuadro sirva en el coche. Tres sesiones con el motor en marcha
+(`phase1_006`, `007` y `008`, 610 s en total) destaparon ocho defectos que ningun
+test ni emulador habria encontrado, porque todos dependen de como se porta el
+enlace real. Todo cerrado entre `fase2.49` y `fase2.55`, cada uno con la linea
+del log que lo demuestra.
+
+- [x] **P1 - Identificar el coche despues de fijar el protocolo.** `fase2.49`.
+  La deteccion corria mientras el adaptador aun contestaba `ATDPN A0`, y sin
+  clase de protocolo ningun perfil casa: la MX-5 salia como generica (tacometro
+  7000, sin zona roja, sin relaciones de cambio). Ahora el protocolo se relee
+  antes de repartir la tabla, y no se afirma identidad sin el.
+- [x] **P2 - Recuperacion de una centralita en silencio.** `fase2.49`. Veinte
+  `NO DATA` seguidos escalan a la reconexion: antes solo se consideraba caido un
+  enlace sin bytes, y una ECU muda deja la pantalla congelada para siempre.
+- [x] **P3 - Timeout de peticion segun el bus.** `fase2.49`. 1000 ms en K-line
+  (la vuelta medida son 383 ms y el clon pasa de 500), 500 en CAN. Quita los
+  `STOPPED` por prompt tardio: 8 por sesion antes, 0 despues.
+- [x] **P4 - Modo 02 solo si la ECU lo anuncia.** `fase2.49`. La MX-5 no lo da
+  (`0100` bit 02 a cero): la fila del congelado dice ahora `SIN MODO 02` en vez
+  de quedarse muda, y no se gastan cinco peticiones en preguntar.
+- [x] **P5 - Umbrales de frescura escalados al enlace.** `fase2.50`. Con 1000 ms
+  fijos, el indicador parpadeaba entre naranja y verde una vez por segundo y el
+  panel se atenuaba al 55 %. Ahora se escala con el hueco medido entre muestras.
+- [x] **P6 - Salida limpia.** `fase2.51` y `fase2.52`. Mantener `START` 1,2 s
+  sale desde cualquier pantalla, tambien desde las que tienen bucle propio; la
+  fila `SALIR` existia pero se dibujaba fuera del panel (x=472 de 480) y era
+  invisible. Las dos salidas escriben el resumen de sesion.
+- [x] **P7 - Una muestra vale tres ciclos de su PID.** `fase2.53`. Con 6 s fijos,
+  el refrigerante salia `N/D` en 45 de 127 muestras, la velocidad en 53 y el aire
+  en 57. Ahora 0, 0 y 11.
+- [x] **P8 - El plan deja de comerse a si mismo.** `fase2.53` y `fase2.55`. El
+  estimador comparaba lo entregado con lo que pedia la tabla (siempre mas que el
+  presupuesto) y recortaba en cada ventana: 2,40 -> 0,80 req/s en cuatro minutos.
+  Ahora compara con el presupuesto y recorta por debajo del 70 %, con lo que el
+  enlace se queda arriba en vez de oscilar.
+- [x] **P9 - Interpolacion de presentacion.** `fase2.55`. Entre dos muestras el
+  valor pintado se mueve hacia la ultima medida en cada fotograma (tau = periodo/3,
+  120-800 ms). El log y los maximos siguen leyendo la medida cruda.
+
+Criterio: el coche se identifica solo, una sesion completa sin `NO DATA`, los
+indicadores se mueven y no parpadean a `N/D`, y salir deja el resumen en el log.
+Pendiente de comprobar en marcha: el indicador de marcha y los valores bajo carga.
+
 ## Fuera de alcance
 
 - Escritura/codificación en la ECU.
