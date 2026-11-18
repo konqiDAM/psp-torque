@@ -881,6 +881,8 @@ static const char *tr(const char *key)
         { "Solo CAN", "CAN only" },
         { "K-line: pendiente", "K-line: pending" },
         { "ACTUAL", "CURRENT" },
+        { "PANTALLA INICIAL", "START SCREEN" },
+        { "ULTIMA", "LAST" },
         { "FALLOS", "FAULTS" },
         { "Codigos de averia", "Fault codes" },
         { "GUARDADOS", "STORED" },
@@ -904,8 +906,8 @@ static const char *tr(const char *key)
     return key;
 }
 
-#define SET_COUNT 17
-#define SET_EXIT  16
+#define SET_COUNT 18
+#define SET_EXIT  17
 
 static int g_settings_open = 0;
 static int g_settings_sel = 0;
@@ -6653,6 +6655,11 @@ static void draw_settings_overlay(void)
             snprintf(value, sizeof(value), "%s",
                      g_cfg.show_fps ? "SI" : "NO");
         } else if (i == 15) {
+            label = tr("PANTALLA INICIAL");
+            snprintf(value, sizeof(value), "%s",
+                     (g_start_mode < 0) ? tr("ULTIMA")
+                                        : mode_name(g_start_mode));
+        } else if (i == 16) {
             label = "DEBUG";
             snprintf(value, sizeof(value), "%s",
                      g_cfg.debug ? "SI" : "NO");
@@ -8897,6 +8904,13 @@ static int handle_settings_input(unsigned int pressed)
         } else if (g_settings_sel == 14) {
             g_cfg.show_fps = !g_cfg.show_fps;
         } else if (g_settings_sel == 15) {
+            /* -1 = la ultima, y luego las pantallas en el orden del
+             * selector. */
+            g_start_mode++;
+            if (g_start_mode >= MODE_COUNT) {
+                g_start_mode = -1;
+            }
+        } else if (g_settings_sel == 16) {
             g_cfg.debug = !g_cfg.debug;
         }
 
