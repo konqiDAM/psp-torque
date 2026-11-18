@@ -924,6 +924,7 @@ static const char *tr(const char *key)
         { "PULSA X PARA SONDEAR EL COCHE.", "PRESS X TO PROBE THE CAR." },
         { "ULTIMA", "LAST" },
         { "FALLOS", "FAULTS" },
+        { "CONGELADO", "FREEZE FRAME" },
         { "Codigos de averia", "Fault codes" },
         { "GUARDADOS", "STORED" },
         { "PENDIENTES", "PENDING" },
@@ -7706,6 +7707,15 @@ static int g_dtc_stored_n = 0;
 static int g_dtc_pending_n = 0;
 static int g_dtc_permanent_n = 0;
 static int g_dtc_count = -1;
+
+/* Modo 02: la foto que guarda la centralita cuando salta el fallo. Solo
+ * se pide si hay codigos guardados; un coche sin codigos no tiene foto y
+ * no se gastan peticiones en preguntar. */
+static int g_ff_valid = 0;
+static int g_ff_rpm = -1;
+static int g_ff_speed = -1;
+static int g_ff_ect = -1;
+static int g_ff_load = -1;
 static char g_dtc_note[32] = "";
 static int g_dtc_request = 0;
 
@@ -7789,6 +7799,53 @@ static void run_fallos(int sock)
         g_dtc_stored_n = obd_dtc_parse(&buf[1], n - 1, g_dtc_stored, DTC_MAX);
         if (g_dtc_stored_n < 0) {
             g_dtc_stored_n = 0;
+        }
+    }
+
+    /* Foto del fallo, solo si hay codigos guardados. */
+    g_ff_valid = 0;
+    g_ff_rpm = -1;
+    g_ff_speed = -1;
+    g_ff_ect = -1;
+    g_ff_load = -1;
+    if (g_dtc_stored_n > 0) {
+        n = dtc_read_hex(sock, "0200", buf, (int)sizeof(buf), &reply);
+        if (n >= 6 && buf[0] == 0x42 && buf[1] == 0x00) {
+            uint32_t ff_mask = obd_disc_mask(&buf[2], n - 2);
+            g_ff_valid = 1;
+
+            /* Los cuatro valores que cuentan la historia del fallo, cada
+             * uno con su decodificacion de la norma (J1979). */
+            if (obd_mask_supports(ff_mask, 0x0C)) {
+                n = dtc_read_hex(sock, "020C00", buf, (int)sizeof(buf),
+                                 &reply);
+                if (n >= 6 && buf[0] == 0x42 && buf[1] == 0x0C) {
+                    g_ff_rpm = ((buf[2] << 8) | buf[3]) / 4;
+                }
+            }
+            if (obd_mask_supports(ff_mask, 0x0D)) {
+                n = dtc_read_hex(sock, "020D00", buf, (int)sizeof(buf),
+                                 &reply);
+                if (n >= 5 && buf[0] == 0x42 && buf[1] == 0x0D) {
+                    g_ff_speed = buf[2];
+                }
+            }
+            if (obd_mask_supports(ff_mask, 0x05)) {
+                n = dtc_read_hex(sock, "020500", buf, (int)sizeof(buf),
+                                 &reply);
+                if (n >= 5 && buf[0] == 0x42 && buf[1] == 0x05) {
+                    g_ff_ect = (int)buf[2] - 40;
+                }
+            }
+            if (obd_mask_supports(ff_mask, 0x04)) {
+                n = dtc_read_hex(sock, "020400", buf, (int)sizeof(buf),
+                                 &reply);
+                if (n >= 5 && buf[0] == 0x42 && buf[1] == 0x04) {
+                    g_ff_load = (int)buf[2] * 100 / 255;
+                }
+            }
+            log_file_printf("Congelado: rpm=%d spd=%d ect=%d load=%d\n",
+                            g_ff_rpm, g_ff_speed, g_ff_ect, g_ff_load);
         }
     }
 
@@ -7884,6 +7941,27 @@ static void draw_fallos(void)
             y += 14;
         }
         y += 4;
+    }
+
+    /* La foto del fallo, si la hay: es lo que estaba pasando cuando salto. */
+    if (g_ff_valid) {
+        gfx_text(8, 232, tr("CONGELADO"), QV_CYAN, 1);
+        char a[12] = "N/D", b[12] = "N/D", c[12] = "N/D", e[12] = "N/D";
+        if (g_ff_rpm >= 0) {
+            snprintf(a, sizeof(a), "%d", g_ff_rpm);
+        }
+        if (g_ff_speed >= 0) {
+            snprintf(b, sizeof(b), "%d", g_ff_speed);
+        }
+        if (g_ff_ect >= 0) {
+            snprintf(c, sizeof(c), "%d", g_ff_ect);
+        }
+        if (g_ff_load >= 0) {
+            snprintf(e, sizeof(e), "%d", g_ff_load);
+        }
+        snprintf(line, sizeof(line), "%s rpm  %s km/h  %s C  %s%%",
+                 a, b, c, e);
+        gfx_text(52, 232, line, QV_DIM, 1);
     }
 
     gfx_text(8, 254, tr("X: LEER   CIRCLE: LIMPIAR PANTALLA"), QV_DIM, 1);
