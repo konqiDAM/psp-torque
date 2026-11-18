@@ -34,16 +34,35 @@ void obd_smooth_reset(obd_smooth *s);
 /* Aplica el filtro a una muestra y devuelve el valor suavizado. */
 float obd_smooth_apply(obd_smooth *s, float v, uint32_t ts);
 
-/* Paso de presentacion: mueve el valor mostrado hacia `target` con la
- * constante de tiempo `tau_ms`, usando el tiempo transcurrido desde la
- * llamada anterior, que es lo que convierte un escalon cada varios
- * segundos en una aguja que se mueve.
+/* ------------------------------------------------------------------ */
+/* Rampa de presentacion.                                             */
+/* ------------------------------------------------------------------ */
+
+/* Entre dos muestras el valor pintado recorre el escalon **entero** en
+ * linea recta durante el intervalo de muestreo, en vez de comerse casi
+ * todo en el primer tercio y quedarse quieto: con un filtro de tau =
+ * periodo/3 la aguja se movia 300 ms y estaba parada 800, que es
+ * exactamente lo que se veia como "no es progresivo".
  *
- * Con dt = 0 (varias lecturas del mismo valor en el mismo fotograma) no
- * cambia nada, asi que se puede llamar desde el camino de lectura sin
- * llevar la cuenta de cuantas veces se lee cada valor por fotograma.
- * tau_ms = 0 congela el valor donde este. */
-float obd_smooth_step(obd_smooth *s, float target, uint32_t now,
-                      uint32_t tau_ms);
+ * Reglas:
+ *   - Un tramo empieza donde esta la aguja (continuidad, sin saltos).
+ *   - Si la muestra tarda mas que el tramo, el valor se queda en el
+ *     objetivo: no se extrapola nada.
+ *   - span_ms = 0 coloca el valor de golpe.
+ */
+typedef struct {
+    float from;
+    float to;
+    float cur;
+    uint32_t t0;
+    uint32_t span_ms;
+    uint32_t sample_ts;
+    int initialized;
+} obd_ramp;
+
+void obd_ramp_reset(obd_ramp *r);
+
+float obd_ramp_step(obd_ramp *r, float target, uint32_t sample_ts,
+                    uint32_t now, uint32_t span_ms);
 
 #endif

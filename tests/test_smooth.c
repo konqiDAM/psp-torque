@@ -97,79 +97,51 @@ static void test_salto_grande(void)
     CHECK(v > 4900.0f);
 }
 
-/* El paso de presentacion mueve el valor en el tiempo: es lo que hace
- * que la aguja no salte cuando llega la muestra. */
-static void test_paso_de_presentacion(void)
+/* La rampa de presentacion: el escalon se recorre entero durante el
+ * intervalo de muestreo, no casi todo al principio. El precio es un
+ * intervalo de retraso, que es lo que compra el movimiento continuo. */
+static void test_rampa(void)
 {
-    obd_smooth s;
-    obd_smooth_reset(&s);
+    obd_ramp r;
+    obd_ramp_reset(&r);
 
-    /* Primer paso: se coloca en el objetivo, no arranca desde cero. */
-    CHECK_NEAR(obd_smooth_step(&s, 3000.0f, 1000u, 300u), 3000.0, 0.001);
+    /* Primera muestra: se coloca, no arranca de cero. */
+    CHECK_NEAR(obd_ramp_step(&r, 1000.0f, 1u, 0u, 1000u), 1000.0, 0.001);
 
-    /* Un fotograma de 16 ms con tau 300 avanza poco. */
-    float v = obd_smooth_step(&s, 4000.0f, 1016u, 300u);
-    CHECK(v > 3000.0f);
-    CHECK(v < 3100.0f);
+    /* Llega la segunda muestra en t=500: la aguja sigue donde estaba y el
+     * tramo empieza ahi (continuidad, sin salto). */
+    CHECK_NEAR(obd_ramp_step(&r, 2000.0f, 2u, 500u, 1000u), 1000.0, 0.001);
+    /* A mitad del tramo, mitad de camino. */
+    CHECK_NEAR(obd_ramp_step(&r, 2000.0f, 2u, 1000u, 1000u), 1500.0, 0.001);
+    /* Y al final del tramo, en el objetivo. */
+    CHECK_NEAR(obd_ramp_step(&r, 2000.0f, 2u, 1500u, 1000u), 2000.0, 0.001);
 
-    /* En un tau recorre el 63% del camino. */
-    v = obd_smooth_step(&s, 4000.0f, 1016u + 300u, 300u);
-    CHECK(v > 3500.0f);
-    CHECK(v < 3700.0f);
+    /* Si la muestra tarda mas que el tramo, se queda en el objetivo: no se
+     * extrapola nada. */
+    CHECK_NEAR(obd_ramp_step(&r, 2000.0f, 2u, 9000u, 1000u), 2000.0, 0.001);
 
-    /* Y al final llega y se queda clavado: sin cola asintotica. */
-    uint32_t t = 1016u + 300u;
-    for (int i = 0; i < 200; i++) {
-        t += 16u;
-        v = obd_smooth_step(&s, 4000.0f, t, 300u);
+    /* Muestra nueva a mitad de camino: el tramo arranca desde donde esta la
+     * aguja, no desde el valor viejo. */
+    obd_ramp_reset(&r);
+    obd_ramp_step(&r, 0.0f, 1u, 0u, 1000u);
+    CHECK_NEAR(obd_ramp_step(&r, 100.0f, 2u, 500u, 1000u), 0.0, 0.001);
+    CHECK_NEAR(obd_ramp_step(&r, 100.0f, 2u, 1000u, 1000u), 50.0, 0.001);
+    float hold = obd_ramp_step(&r, 200.0f, 3u, 1000u, 1000u);
+    CHECK_NEAR(hold, 50.0, 0.001);
+    CHECK_NEAR(obd_ramp_step(&r, 200.0f, 3u, 1500u, 1000u), 125.0, 0.001);
+
+    /* Un tramo de duracion cero coloca el valor de golpe. */
+    CHECK_NEAR(obd_ramp_step(&r, 900.0f, 4u, 600u, 0u), 900.0, 0.001);
+
+    /* Nunca se sale del intervalo entre el valor viejo y el nuevo. */
+    obd_ramp_reset(&r);
+    obd_ramp_step(&r, 0.0f, 1u, 0u, 1000u);
+    obd_ramp_step(&r, 100.0f, 2u, 0u, 1000u);
+    for (uint32_t t = 0; t <= 2000u; t += 16u) {
+        float v = obd_ramp_step(&r, 100.0f, 2u, t, 1000u);
+        CHECK(v >= -0.001f);
+        CHECK(v <= 100.001f);
     }
-    CHECK_NEAR(v, 4000.0, 0.001);
-
-    /* Dos lecturas en el mismo fotograma no avanzan el estado. */
-    float a = obd_smooth_step(&s, 5000.0f, t + 16u, 300u);
-    float b = obd_smooth_step(&s, 5000.0f, t + 16u, 300u);
-    CHECK_NEAR(a, b, 0.0001);
-}
-
-/* Los invariantes de los que depende el panel: el envolvente no se pasa,
- * el desbordamiento del reloj no rompe nada, un reset vuelve a enganchar
- * el valor exacto y tau 0 congela en vez de saltar. */
-static void test_invariantes(void)
-{
-    obd_smooth s;
-    obd_smooth_reset(&s);
-
-    /* Sin sobrepasar el envolvente, aunque el objetivo salte de un extremo
-     * al otro: es lo que garantiza que una aguja no se pase del maximo. */
-    obd_smooth_step(&s, 0.0f, 1000u, 300u);
-    float lo = 0.0f;
-    float hi = 100.0f;
-    uint32_t t = 1000u;
-    for (int i = 0; i < 600; i++) {
-        t += 16u;
-        float target = (i % 2) ? hi : lo;
-        float v = obd_smooth_step(&s, target, t, 300u);
-        CHECK(v >= lo - 0.001f);
-        CHECK(v <= hi + 0.001f);
-    }
-
-    /* Desbordamiento del contador de milisegundos: la resta es uint32, no
-     * un desbordamiento con signo. */
-    obd_smooth_reset(&s);
-    obd_smooth_step(&s, 100.0f, 0xFFFFFFF0u, 300u);
-    float v = obd_smooth_step(&s, 200.0f, 0x30u, 300u);
-    CHECK(v > 100.0f);
-    CHECK(v < 200.0f);
-
-    /* Tras un reset, la siguiente lectura es la medida, no una mezcla:
-     * asi el baro de key-on y los cambios de ajuste no se contaminan. */
-    obd_smooth_reset(&s);
-    CHECK_NEAR(obd_smooth_step(&s, 77.0f, 5000u, 800u), 77.0, 0.001);
-
-    /* tau 0 congela: no inventa un salto. */
-    obd_smooth_reset(&s);
-    obd_smooth_step(&s, 10.0f, 1000u, 300u);
-    CHECK_NEAR(obd_smooth_step(&s, 90.0f, 1016u, 0u), 10.0, 0.001);
 }
 
 void test_smooth(void)
@@ -180,6 +152,5 @@ void test_smooth(void)
     test_convergencia_con_tau();
     test_retraso_independiente_de_la_cadencia();
     test_salto_grande();
-    test_paso_de_presentacion();
-    test_invariantes();
+    test_rampa();
 }

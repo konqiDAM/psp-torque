@@ -237,13 +237,22 @@ pero en el K-line de la MX-5 cada valor vuelve cada 1-10 s y la aguja daba un
 salto y se quedaba parada. Eso es lo que parece "lento" aunque el dato sea
 correcto.
 
-`sample_value()` aplica ahora `obd_smooth_step()` en cada fotograma: el valor
-pintado se mueve hacia la última medida con `tau = periodo/3` (120-800 ms), así
-que el RPM llega en ~300 ms y el MAF cruza un escalón de 10 s en unos dos
-segundos. Propiedades que mantiene:
+`sample_value()` aplica ahora `obd_ramp_step()` en cada fotograma: el valor
+pintado **recorre el escalón entero en línea recta** durante el intervalo de
+muestreo de ese PID (150 ms - 4 s), así que la aguja está siempre en movimiento
+y llega al valor nuevo justo cuando entra el siguiente.
+
+La primera versión usaba un filtro exponencial con `tau = periodo/3` y no valía:
+cubría el 95 % del escalón en el primer tercio del intervalo y se quedaba parada
+el resto, que en pantalla se ve como "se mueve de golpe y luego nada". El precio
+de la rampa es un intervalo de retraso, y es el que compra el movimiento
+continuo.
 
 - Solo se acerca a medidas que han llegado: no extrapola.
-- La antigüedad y el `N/D` se miden con la marca de la muestra, no con esto.
+- La antigüedad y el `N/D` se miden con la marca de la muestra, no con esto, y
+  caducan con el intervalo **real** de ese PID (media móvil del hueco entre
+  muestras), no con el que promete el plan: el aire de admisión volvía cada 7 s
+  con la ventana calculada en 9 y salía `N/D` en 17 de 87 muestras.
 - `sample_value_raw()` es la lectura exacta, y es la que usan el log de estado y
   los máximos: la evidencia no puede ser la animación.
 - Se reinicia al conectar y al cambiar el ajuste, para no arrastrar medio valor.

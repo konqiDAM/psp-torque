@@ -20,33 +20,56 @@ void obd_smooth_reset(obd_smooth *s)
     s->initialized = 0;
 }
 
-float obd_smooth_step(obd_smooth *s, float target, uint32_t now,
-                      uint32_t tau_ms)
+void obd_ramp_reset(obd_ramp *r)
 {
-    if (!s->initialized) {
-        s->value = target;
-        s->initialized = 1;
-        s->last_ts = now;
-        return s->value;
+    r->from = 0.0f;
+    r->to = 0.0f;
+    r->cur = 0.0f;
+    r->t0 = 0;
+    r->span_ms = 0;
+    r->sample_ts = 0;
+    r->initialized = 0;
+}
+
+float obd_ramp_step(obd_ramp *r, float target, uint32_t sample_ts,
+                    uint32_t now, uint32_t span_ms)
+{
+    if (!r->initialized) {
+        r->from = target;
+        r->to = target;
+        r->cur = target;
+        r->t0 = now;
+        r->span_ms = span_ms;
+        r->sample_ts = sample_ts;
+        r->initialized = 1;
+        return r->cur;
     }
 
-    uint32_t dt = now - s->last_ts;
-    s->last_ts = now;
-    if (dt == 0u || tau_ms == 0u) {
-        return s->value;
+    if (sample_ts != r->sample_ts) {
+        /* Muestra nueva: el tramo arranca donde esta la aguja ahora, para
+         * que llegue a mitad de camino no se traduzca en un salto. */
+        r->from = r->cur;
+        r->to = target;
+        r->t0 = now;
+        r->span_ms = span_ms;
+        r->sample_ts = sample_ts;
+    } else if (r->to != target) {
+        r->from = r->cur;
+        r->to = target;
+        r->t0 = now;
     }
 
-    float a = 1.0f - expf(-(float)dt / (float)tau_ms);
-    s->value += (target - s->value) * a;
-
-    /* Cerca del objetivo se pega: sin esto la cola asintotica deja el
-     * valor a un pelo del real durante minutos, y en un display eso se ve
-     * como un decimal que nunca cierra. */
-    float eps = fabsf(target) * 0.002f + 0.01f;
-    if (fabsf(target - s->value) <= eps) {
-        s->value = target;
+    if (r->span_ms == 0u) {
+        r->cur = r->to;
+        return r->cur;
     }
-    return s->value;
+
+    uint32_t elapsed = now - r->t0;
+    float frac = (elapsed >= r->span_ms)
+                     ? 1.0f
+                     : (float)elapsed / (float)r->span_ms;
+    r->cur = r->from + (r->to - r->from) * frac;
+    return r->cur;
 }
 
 float obd_smooth_apply(obd_smooth *s, float v, uint32_t ts)

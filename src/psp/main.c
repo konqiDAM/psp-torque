@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.55 2026-11-18 interpolacion de presentacion, plan estable, log crudo"
+#define BUILD_TAG "fase2.56 2026-11-18 rampa de presentacion continua, caducidad por cadencia real"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -2019,6 +2019,64 @@ static void fmt_1(char *buf, size_t size, float value)
              scaled / 10, scaled % 10);
 }
 
+static obd_ramp g_disp[256];
+
+/* Cadencia real de cada PID: con cuanto tarda de verdad en volver, no con
+ * lo que promete el plan. */
+static uint32_t g_seen_ts[256];
+static uint32_t g_seen_iv_ms[256];
+
+static void disp_reset(void)
+{
+    for (int i = 0; i < 256; i++) {
+        obd_ramp_reset(&g_disp[i]);
+        g_seen_ts[i] = 0;
+        g_seen_iv_ms[i] = 0;
+    }
+}
+
+/* Duracion del tramo de presentacion: el intervalo de muestreo de ese PID,
+ * entre 150 ms y 4 s. El RPM se mueve durante todo su segundo; el MAF, si
+ * vuelve cada 7 s, recorre el escalon en 4 y espera el resto. */
+static uint32_t disp_span_ms(uint8_t pid)
+{
+    uint32_t p = 0;
+    for (int i = 0; i < g_sched.count; i++) {
+        if (g_sched.items[i].pid == pid) {
+            p = g_sched.items[i].period_ms;
+            break;
+        }
+    }
+    if (p == 0u) {
+        return 400u;
+    }
+    if (p < 150u) {
+        p = 150u;
+    }
+    if (p > 4000u) {
+        p = 4000u;
+    }
+    return p;
+}
+
+/* Apunta el intervalo real entre muestras de un PID. Es lo que decide
+ * cuanto vale una lectura: en el MX-5 el plan promete periodos que el
+ * enlace no siempre cumple, y con la ventana calculada sobre lo prometido
+ * el aire de admision (que volvia cada 7 s) salia N/D en 17 de 87
+ * muestras. */
+static void seen_note(uint8_t pid, uint32_t ts)
+{
+    if (g_seen_ts[pid] != 0u && ts > g_seen_ts[pid]) {
+        uint32_t iv = ts - g_seen_ts[pid];
+        if (iv < 30000u) {
+            g_seen_iv_ms[pid] = g_seen_iv_ms[pid]
+                                    ? (g_seen_iv_ms[pid] * 7u + iv) / 8u
+                                    : iv;
+        }
+    }
+    g_seen_ts[pid] = ts;
+}
+
 /* Cuanto sigue valiendo una muestra.
  *
  * El tope fijo de 6 s vale en CAN, donde un PID vuelve cada 330 ms. En el
@@ -2029,19 +2087,28 @@ static void fmt_1(char *buf, size_t size, float value)
  * de sus propios ciclos, con suelo de 6 s y techo de 20. */
 static uint32_t sample_valid_ms(uint8_t pid)
 {
+    uint32_t sched = 0;
     for (int i = 0; i < g_sched.count; i++) {
         if (g_sched.items[i].pid == pid) {
-            uint32_t v = (uint32_t)g_sched.items[i].period_ms * 3u;
-            if (v < 6000u) {
-                v = 6000u;
-            }
-            if (v > 20000u) {
-                v = 20000u;
-            }
-            return v;
+            sched = g_sched.items[i].period_ms;
+            break;
         }
     }
-    return 6000u;
+    /* Manda el intervalo real cuando ya se conoce; lo prometido es el
+     * suelo. */
+    uint32_t real = g_seen_iv_ms[pid];
+    uint32_t base = (real > sched) ? real : sched;
+    if (base == 0u) {
+        base = 2000u;
+    }
+    uint32_t v = base * 3u;
+    if (v < 6000u) {
+        v = 6000u;
+    }
+    if (v > 30000u) {
+        v = 30000u;
+    }
+    return v;
 }
 
 /* Presentacion: el valor que se pinta no salta al llegar la muestra,
@@ -2050,39 +2117,6 @@ static uint32_t sample_valid_ms(uint8_t pid)
  * y el resto del tiempo esta quieta, que es lo que parece "lento" aunque
  * el dato sea correcto. Es solo presentacion: la antiguedad se sigue
  * midiendo con la marca de la muestra, no con esto. */
-static obd_smooth g_disp[256];
-
-static void disp_reset(void)
-{
-    for (int i = 0; i < 256; i++) {
-        obd_smooth_reset(&g_disp[i]);
-    }
-}
-
-/* Un tercio del periodo que el plan da a ese PID, entre 120 y 800 ms: el
- * RPM (1 s) llega en ~300 ms y el MAF (10 s) tarda ~2 s en recorrer el
- * escalon entero, en vez de aparecer de golpe. */
-static uint32_t disp_tau_ms(uint8_t pid)
-{
-    uint32_t p = 0;
-    for (int i = 0; i < g_sched.count; i++) {
-        if (g_sched.items[i].pid == pid) {
-            p = g_sched.items[i].period_ms;
-            break;
-        }
-    }
-    if (p == 0u) {
-        return 250u;
-    }
-    uint32_t t = p / 3u;
-    if (t < 120u) {
-        t = 120u;
-    }
-    if (t > 800u) {
-        t = 800u;
-    }
-    return t;
-}
 
 /* Lectura exacta, sin suavizado: la medida tal cual llego. Es la que va
  * al log y a los maximos, que son registro y no presentacion. */
@@ -2092,6 +2126,9 @@ static int sample_value_raw(uint8_t pid, uint32_t now, float *out)
     if (sample == NULL || !sample->valid) {
         return 0;
     }
+    /* La cadencia se apunta antes de juzgar la edad: lo que se mide es
+     * cuanto tarda en volver, no si ha caducado ya. */
+    seen_note(pid, sample->ts_ms);
     if ((uint32_t)(now - sample->ts_ms) > sample_valid_ms(pid)) {
         return 0;
     }
@@ -2110,7 +2147,12 @@ static int sample_value(uint8_t pid, uint32_t now, float *out)
     if (!g_cfg.smooth) {
         return 1;
     }
-    *out = obd_smooth_step(&g_disp[pid], *out, now, disp_tau_ms(pid));
+    const obd_sample *sample = obd_store_get(&g_store, pid);
+    if (sample == NULL) {
+        return 1;
+    }
+    *out = obd_ramp_step(&g_disp[pid], sample->value, sample->ts_ms, now,
+                         disp_span_ms(pid));
     return 1;
 }
 

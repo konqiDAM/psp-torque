@@ -320,12 +320,13 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
   entrega de verdad y sube o baja ese presupuesto. En CAN el techo son ~18
   peticiones/s; en el K-line de la MX-5, 2,5 (383 ms por petición). Un test
   del núcleo calcula la demanda y falla si se pasa del presupuesto.
-- **Interpolación de presentación:** entre dos muestras el valor que se pinta
-  se mueve hacia la última medida en cada fotograma, con una constante de
-  tiempo de un tercio del periodo de ese PID (120–800 ms). Con un enlace que
-  solo da una lectura cada 4 s, la aguja se mueve en vez de saltar y quedarse
-  quieta. No extrapola: solo se acerca a medidas que han llegado, y si el dato
-  envejece se sigue mostrando `N/D`. Se apaga con el ajuste **SUAVIZADO**.
+- **Interpolación de presentación:** entre dos muestras el valor pintado
+  recorre el escalón entero en línea recta durante el intervalo de muestreo de
+  ese PID (150 ms–4 s), así que la aguja está siempre en movimiento y llega al
+  valor nuevo cuando entra el siguiente. Cuesta un intervalo de retraso, que es
+  el precio del movimiento continuo. No extrapola: si una muestra no llega, el
+  valor se queda donde está, y si envejece se sigue mostrando `N/D`. Se apaga
+  con el ajuste **SUAVIZADO**.
 - **Filtro de 150 ms sobre la muestra**, aparte de la interpolación: quita el
   ruido del propio dato en el momento de guardarlo.
 - **Cadencia por VBlank:** el dibujo se sincroniza con `sceDisplayGetVcount()`

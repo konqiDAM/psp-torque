@@ -316,12 +316,13 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
   actually delivers and raises or lowers that budget. On CAN the ceiling is
   ~18 requests/s; on the MX-5's K-line it is 2.5 (383 ms per request). A core
   test computes the demand and fails if it goes over budget.
-- **Display interpolation:** between samples, the value being drawn moves
-  toward the latest measurement on every frame, with a time constant of a
-  third of that PID's period (120–800 ms). On a link that only answers once
-  every 4 s, the needle moves instead of jumping and then sitting still. It
-  never extrapolates: it only closes on measurements that arrived, and a
-  stale value still becomes `N/D`. Turned off by the **SUAVIZADO** setting.
+- **Display interpolation:** between samples, the drawn value walks the whole
+  step in a straight line across that PID's sampling interval (150 ms–4 s), so
+  the needle is always moving and reaches the new value as the next sample
+  arrives. It costs one interval of lag, which is the price of continuous
+  motion. It never extrapolates: if a sample does not arrive the value stays
+  where it is, and a stale value still becomes `N/D`. Turned off by the
+  **SUAVIZADO** setting.
 - **A 150 ms filter on the sample**, separate from the interpolation: it
   removes noise from the measurement itself when it is stored.
 - **VBlank cadence:** drawing is synchronised with `sceDisplayGetVcount()`
