@@ -625,6 +625,96 @@ static int g_tel_item[TEL_SLOTS] = {
     W_RPM, W_BOOST, W_ECT, W_SPEED, W_OFF
 };
 
+/* FASE U4b: lo que el coche puede o no llenar.
+ *
+ * La vista no se toca ni se guarda: g_slot_item sigue siendo la del
+ * usuario y settings.txt escribe esa. Lo unico que cambia es lo que se
+ * PINTA: si el coche no tiene MAP, los huecos que iban de BOOST y de MAP
+ * ensenan MAF y carga en vez de dos N/D. En cuanto el usuario toca la
+ * vista a mano manda la suya y el coche no opina. */
+static int g_vehicle_centre = OBD_CENTRE_BOOST;
+static int g_layout_user = 0;        /* 1 = el usuario ha tocado la vista */
+
+static int slot_item_eff(int i)
+{
+    if (i < 0 || i >= DASH_SLOTS) {
+        return W_OFF;
+    }
+    if (g_layout_user) {
+        return g_slot_item[i];
+    }
+    if (g_vehicle_centre == OBD_CENTRE_MAF) {
+        if (i == 2) {
+            return W_MAF;
+        }
+        if (i == 5) {
+            return W_LOAD;
+        }
+    } else if (g_vehicle_centre == OBD_CENTRE_LOAD) {
+        if (i == 2) {
+            return W_LOAD;
+        }
+        if (i == 5) {
+            return W_MAF;
+        }
+    }
+    return g_slot_item[i];
+}
+
+/* El estilo acompana al hueco cuando el coche lo cambia. */
+static int slot_style_eff(int i)
+{
+    if (i < 0 || i >= DASH_SLOTS) {
+        return STYLE_OFF;
+    }
+    if (!g_layout_user && slot_item_eff(i) != g_slot_item[i]) {
+        return (i == 2) ? STYLE_BAR : STYLE_TEXT;
+    }
+    return g_slot_style[i];
+}
+
+/* La serie de telemetria que pintaba boost en el grafico. */
+static int tel_item_eff(int i)
+{
+    if (i < 0 || i >= TEL_SLOTS) {
+        return W_OFF;
+    }
+    if (!g_layout_user && g_tel_item[i] == W_BOOST) {
+        if (g_vehicle_centre == OBD_CENTRE_MAF) {
+            return W_MAF;
+        }
+        if (g_vehicle_centre == OBD_CENTRE_LOAD) {
+            return W_LOAD;
+        }
+    }
+    return g_tel_item[i];
+}
+
+/* 1 mientras la vista sea la de fabrica: es lo unico que el perfil del
+ * coche puede sustituir. En cuanto el usuario cambia un hueco, su vista
+ * manda y no se toca ni al cambiar de coche. */
+static int layout_is_factory(void)
+{
+    static const int fit[DASH_SLOTS] = { W_RPM, W_SPEED, W_BOOST,
+                                         W_ECT, W_IAT, W_MAP };
+    static const int fit_style[DASH_SLOTS] = { STYLE_GAUGE, STYLE_GAUGE,
+                                               STYLE_BAR, STYLE_TEXT,
+                                               STYLE_TEXT, STYLE_TEXT };
+    static const int fit_tel[TEL_SLOTS] = { W_RPM, W_BOOST, W_ECT,
+                                            W_SPEED, W_OFF };
+    for (int i = 0; i < DASH_SLOTS; i++) {
+        if (g_slot_item[i] != fit[i] || g_slot_style[i] != fit_style[i]) {
+            return 0;
+        }
+    }
+    for (int i = 0; i < TEL_SLOTS; i++) {
+        if (g_tel_item[i] != fit_tel[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int g_edit_open = 0;
 static int g_edit_sel = 0;
 static int g_tel_edit_open = 0;
@@ -1222,9 +1312,15 @@ static void settings_load(void)
     }
 
     settings_apply();
-    log_file_printf("Ajustes: tema=%s contraste=%d animacion=%s\n",
+
+    /* Si la vista guardada no es la de fabrica, la ha tocado el usuario:
+     * el perfil del coche no la sustituye. */
+    g_layout_user = !layout_is_factory();
+
+    log_file_printf("Ajustes: tema=%s contraste=%d animacion=%s%s\n",
                     gfx_theme_name(g_cfg.theme), g_cfg.contrast,
-                    g_cfg.anim ? "SI" : "NO");
+                    g_cfg.anim ? "SI" : "NO",
+                    g_layout_user ? " vista=PROPIA" : " vista=FABRICA");
 }
 
 static void settings_save(void)
@@ -2577,6 +2673,23 @@ static void vehicle_detect(void)
         g_profile_cut = p->fuel_cut;
     }
 
+    /* El centro del cuadro, por capacidad: con MAP y baro hay boost; sin
+     * MAP pero con MAF se pinta MAF; sin ninguno de los dos, carga. Un
+     * perfil puede decirlo (la MX-5 dice MAF); si no, se deduce de lo que
+     * el coche declara. */
+    if (p->centre == OBD_CENTRE_FROM_CAPS) {
+        /* 0x33 (baro) vive en el bloque 0x20: mascara 2, bit 0x13. */
+        if (g_map_supported && obd_mask_supports(g_mask2, 0x13)) {
+            g_vehicle_centre = OBD_CENTRE_BOOST;
+        } else if (g_maf_supported) {
+            g_vehicle_centre = OBD_CENTRE_MAF;
+        } else {
+            g_vehicle_centre = OBD_CENTRE_LOAD;
+        }
+    } else {
+        g_vehicle_centre = p->centre;
+    }
+
     log_file_printf("Vehiculo: %s (%s, proto %s, mascaras %08X/%08X/%08X)"
                     " tacometro=%d rojo=%d corte=%d\n",
                     p->name,
@@ -2655,14 +2768,14 @@ static void apply_screen_schedule(uint32_t now)
     memset(&forced, 0, sizeof(forced));
     if (g_mode == MODE_QV) {
         for (int i = 0; i < DASH_SLOTS; i++) {
-            uint8_t pid = widget_pid(g_slot_item[i]);
+            uint8_t pid = widget_pid(slot_item_eff(i));
             if (pid != 0) {
                 obd_forced_set_add(&forced, pid);
             }
         }
     } else if (g_mode == MODE_TELEMETRY) {
         for (int i = 0; i < TEL_SLOTS; i++) {
-            uint8_t pid = widget_pid(g_tel_item[i]);
+            uint8_t pid = widget_pid(tel_item_eff(i));
             if (pid != 0) {
                 obd_forced_set_add(&forced, pid);
             }
@@ -5550,7 +5663,7 @@ static void draw_qv(const dash_data *d)
                                            80.0f,  80.0f,  80.0f };
 
     for (int i = 0; i < DASH_SLOTS; i++) {
-        draw_dash_widget(d, g_slot_item[i], g_slot_style[i],
+        draw_dash_widget(d, slot_item_eff(i), slot_style_eff(i),
                          rx[i], ry[i], rw[i], rh[i]);
     }
 }
@@ -6094,7 +6207,7 @@ static void draw_telemetry(void)
 
     /* Leyenda: solo las series que el usuario haya activado. */
     for (int i = 0; i < TEL_SLOTS; i++) {
-        int item = g_tel_item[i];
+        int item = tel_item_eff(i);
         if (item == W_OFF) {
             continue;
         }
@@ -6115,7 +6228,7 @@ static void draw_telemetry(void)
     gfx_rect(gx, gy + gh - 1.0f, gw, 1.0f, QV_TRACK);
 
     for (int i = 0; i < TEL_SLOTS; i++) {
-        int item = g_tel_item[i];
+        int item = tel_item_eff(i);
         if (item == W_OFF) {
             continue;
         }
@@ -6132,7 +6245,7 @@ static void draw_telemetry(void)
         8.0f, 102.0f, 196.0f, 290.0f, 384.0f
     };
     for (int i = 0; i < TEL_SLOTS; i++) {
-        draw_tel_stat(g_tel_item[i], sx[i], 196.0f, 88.0f, 70.0f);
+        draw_tel_stat(tel_item_eff(i), sx[i], 196.0f, 88.0f, 70.0f);
     }
 }
 
@@ -7613,7 +7726,7 @@ static int dash_widget_count(void)
 {
     int n = 0;
     for (int i = 0; i < DASH_SLOTS; i++) {
-        if (g_slot_item[i] != W_OFF && g_slot_style[i] != STYLE_OFF) {
+        if (slot_item_eff(i) != W_OFF && slot_style_eff(i) != STYLE_OFF) {
             n++;
         }
     }
@@ -8303,10 +8416,12 @@ static int handle_edit_input(unsigned int pressed)
     }
     if (pressed & PSP_CTRL_TRIANGLE) {
         g_slot_item[g_edit_sel] = widget_cycle(g_slot_item[g_edit_sel], 1, 0);
+        g_layout_user = 1;
         changed = 1;
     }
     if (pressed & PSP_CTRL_SQUARE) {
         g_slot_item[g_edit_sel] = widget_cycle(g_slot_item[g_edit_sel], -1, 0);
+        g_layout_user = 1;
         changed = 1;
     }
 
@@ -8341,11 +8456,13 @@ static int handle_tel_edit_input(unsigned int pressed)
     if (pressed & PSP_CTRL_RIGHT) {
         g_tel_item[g_tel_edit_sel] =
             tel_cycle_step(g_tel_item[g_tel_edit_sel], 1);
+        g_layout_user = 1;
         changed = 1;
     }
     if (pressed & PSP_CTRL_LEFT) {
         g_tel_item[g_tel_edit_sel] =
             tel_cycle_step(g_tel_item[g_tel_edit_sel], -1);
+        g_layout_user = 1;
         changed = 1;
     }
 
