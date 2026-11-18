@@ -8364,6 +8364,9 @@ static const info_entry g_info[] = {
       "Temperatura del aceite del motor (0x5C)." },
     { W_FUEL, "COMBUSTIBLE",
       "Nivel de combustible en % (0x2F)." },
+    { W_GEAR, "MARCHA",
+      "Marcha deducida de RPM y velocidad con las relaciones del coche. "
+      "Si no cuadra con ninguna, N/D." },
     { W_STFT, "STFT",
       "Correccion corta de mezcla, banco 1 (0x06)." },
     { W_LTFT, "LTFT",
