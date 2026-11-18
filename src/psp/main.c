@@ -9284,13 +9284,11 @@ static int handle_edit_input(unsigned int pressed)
         g_slot_item[g_edit_sel] = widget_cycle(g_slot_item[g_edit_sel], 1, 0);
         g_layout_user = 1;
         g_layout_dirty = 1;
-        g_layout_dirty = 1;
         changed = 1;
     }
     if (pressed & PSP_CTRL_SQUARE) {
         g_slot_item[g_edit_sel] = widget_cycle(g_slot_item[g_edit_sel], -1, 0);
         g_layout_user = 1;
-        g_layout_dirty = 1;
         g_layout_dirty = 1;
         changed = 1;
     }
