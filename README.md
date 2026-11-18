@@ -158,10 +158,10 @@ salir. Si se quedó en una herramienta, abre GENERAL.
 
 | Pantalla | Contenido |
 |---|---|
-| **GENERAL** | Tacómetro, velocímetro, boost y tiles de ECT / IAT / MAP. |
+| **GENERAL** | Tacómetro, velocímetro, boost y tiles de ECT / IAT / MAP. En un coche sin MAP, el coche cambia los tres huecos que quedarían vacíos: MAF al centro, MARCHA a un lado y AVANCE al otro. |
 | **MOTOR** | Rejilla de tiles: MAP (o MAF), BOOST, ECT, IAT, acelerador, mariposa/load, tensión, aceite y combustible. Las cajas no disponibles se compactan: no dejan huecos. |
 | **DIAG** | Diagnóstico avanzado de solo lectura: STFT, LTFT, avance, tensiones O₂, combustible, voltaje, distancia con MIL y voltaje de batería. |
-| **TELEM** | Gráfica de 5 series a la vez + máximos/mínimos de sesión. |
+| **TELEM** | Gráfica de 5 series a la vez (por defecto RPM, boost, avance y mariposa) + máximos/mínimos de sesión. |
 | **FALLOS** | Códigos de avería: estado de la lámpara, guardados (03), pendientes (07) y permanentes (0A) con su significado, decodificados en la PSP, más la foto del fallo (02) si la ECU la da. `X` lee, `CIRCLE` limpia la pantalla — nunca la centralita. |
 | **MODULOS** | Descubrimiento de centralitas OBD‑II y UDS. `X` lanza el escaneo. Funciona también en coches de K-line, donde lee las máscaras OBD‑II y se salta el sondeo que es solo CAN. |
 | **SNIFFER** | Captura de todo el tráfico CAN del bus. `X` inicia o detiene. |

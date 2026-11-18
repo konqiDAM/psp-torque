@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.57 2026-11-18 revision completa: mariposa, sniffer vivo, tacometro global, map plausible"
+#define BUILD_TAG "fase2.58 2026-11-18 GENERAL con avance, TELEM con avance y mariposa, grafico suavizado, leyenda legible"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -734,7 +734,7 @@ static int g_slot_style[DASH_SLOTS] = {
 };
 
 static int g_tel_item[TEL_SLOTS] = {
-    W_RPM, W_BOOST, W_ECT, W_SPEED, W_OFF
+    W_RPM, W_BOOST, W_TIMING, W_THR, W_OFF
 };
 
 /* FASE U4b: lo que el coche puede o no llenar.
@@ -800,7 +800,9 @@ static int slot_item_eff(int i)
             return W_GEAR;
         }
         if (i == 5) {
-            return W_LOAD;
+            /* Avance de encendido donde un coche con turbo veria el MAP:
+             * ivan lo sigue en conduccion y la carga no le dice nada. */
+            return W_TIMING;
         }
     } else if (g_vehicle_centre == OBD_CENTRE_LOAD) {
         if (i == 2) {
@@ -1582,8 +1584,8 @@ static void settings_load(void)
     g_slot_item[5] = W_MAP;   g_slot_style[5] = STYLE_TEXT;
     g_tel_item[0] = W_RPM;
     g_tel_item[1] = W_BOOST;
-    g_tel_item[2] = W_ECT;
-    g_tel_item[3] = W_SPEED;
+    g_tel_item[2] = W_TIMING;
+    g_tel_item[3] = W_THR;
     g_tel_item[4] = W_OFF;
 
     g_car_prefs_count = 0;
@@ -6710,7 +6712,8 @@ static void graph_series(const float *hist, float lo, float hi, uint32_t bit,
     }
     int start = (g_hist_count < HIST_MAX) ? 0 : g_hist_pos;
     int prev_valid = 0;
-    float prev_x = 0.0f, prev_y = 0.0f;
+    float px_draw = 0.0f, py_draw = 0.0f;
+    float y0 = 0.0f, y1 = 0.0f;
 
     for (int k = 0; k < g_hist_count; k++) {
         int idx = (start + k) % HIST_MAX;
@@ -6723,11 +6726,20 @@ static void graph_series(const float *hist, float lo, float hi, uint32_t bit,
         if (v > hi) v = hi;
         float x = gx + gw * (float)k / (float)(g_hist_count - 1);
         float y = gy + gh - (v - lo) / (hi - lo) * gh;
+
+        /* Media movil sobre la linea, no sobre el registro: los numeros de
+         * las casillas siguen siendo la medida, pero el trazo deja de salir
+         * a dientes de sierra. Cada punto se dibuja a la media de los tres
+         * ultimos (el anterior, el actual y el siguiente, que aqui se lee
+         * como [k-1], [k] y [k+1] desplazados un punto). */
+        float y3 = (y0 + 2.0f * y1 + y) * 0.25f;
         if (prev_valid) {
-            gfx_line(prev_x, prev_y, x, y, 2.0f, color);
+            gfx_line(px_draw, py_draw, x, y3, 2.0f, color);
         }
-        prev_x = x;
-        prev_y = y;
+        y0 = y1;
+        y1 = y;
+        px_draw = x;
+        py_draw = y3;
         prev_valid = 1;
     }
 }
@@ -6998,10 +7010,12 @@ static void draw_tel_stat(int item, float x, float y, float w, float h)
         return;
     }
 
+    /* Titulo compacto: "AVZ 10 deg" en 88 px; con "MAX" delante y la
+     * unidad detras no cabia y se salia del panel. */
     char title[28];
-    snprintf(title, sizeof(title), "%s MAX %s", tel_short(item),
+    snprintf(title, sizeof(title), "%s %s", tel_short(item),
              tel_unit(item));
-    gfx_text((int)x + 8, (int)y + 6, title, QV_DIM, 1);
+    gfx_text((int)x + 6, (int)y + 4, title, QV_TEXT, 1);
 
     float mn, mx;
     int n;
@@ -7012,13 +7026,12 @@ static void draw_tel_stat(int item, float x, float y, float w, float h)
 
     if (n > 0) {
         tel_print(item, mx, buf, sizeof(buf));
-        gfx_text((int)x + 8, (int)y + 20, buf,
-                 tel_color(item), 2);
+        gfx_text((int)x + 6, (int)y + 20, buf, tel_color(item), 2);
         tel_print(item, mn, small, sizeof(small));
-        gfx_text((int)x + 8, (int)y + h - 12, "MIN", QV_DIM, 1);
-        gfx_text((int)x + 40, (int)y + h - 12, small, QV_DIM, 1);
+        gfx_text((int)x + 6, (int)y + h - 12, tr("MIN"), QV_DIM, 1);
+        gfx_text((int)x + 34, (int)y + h - 12, small, QV_TEXT, 1);
     } else {
-        gfx_text((int)x + 8, (int)y + 20, "N/D", QV_DIM, 2);
+        gfx_text((int)x + 6, (int)y + 20, "N/D", QV_DIM, 2);
     }
 }
 static void draw_telemetry(void)
@@ -7030,17 +7043,29 @@ static void draw_telemetry(void)
 
     qv_panel(px, py, pw, ph);
     gfx_text((int)px + 10, (int)py + 8, tr("TELEMETRIA"), QV_DIM, 1);
-    gfx_text((int)px + 96, (int)py + 8, tr("X: ELEGIR SERIES"), QV_DIM, 1);
+    gfx_text((int)px + 90, (int)py + 8, tr("X: SERIES"), QV_DIM, 1);
 
-    /* Leyenda: solo las series que el usuario haya activado. */
-    for (int i = 0; i < TEL_SLOTS; i++) {
-        int item = tel_item_eff(i);
-        if (item == W_OFF) {
-            continue;
+    /* Leyenda: un color y un nombre corto por serie activa. Cada entrada
+     * ocupa lo que mide su texto mas el cuadro de color: con un paso fijo
+     * de 56 px los nombres largos se pisaban entre ellos y con la etiqueta
+     * de serie de la esquina, que es la mitad de la ilegibilidad de esta
+     * pantalla. */
+    {
+        float lx = px + 196.0f;
+        for (int i = 0; i < TEL_SLOTS; i++) {
+            int item = tel_item_eff(i);
+            if (item == W_OFF) {
+                continue;
+            }
+            const char *nm = tel_short(item);
+            float w = 8.0f + 4.0f + (float)gfx_text_width(nm, 1) + 10.0f;
+            if (lx + w > px + pw - 8.0f) {
+                break;
+            }
+            gfx_rect(lx, py + 9.0f, 8.0f, 8.0f, tel_color(item));
+            gfx_text((int)lx + 12, (int)py + 8, nm, QV_TEXT, 1);
+            lx += w;
         }
-        float lx = px + 196.0f + (float)i * 56.0f;
-        gfx_rect(lx, py + 9.0f, 8.0f, 8.0f, tel_color(item));
-        gfx_text((int)lx + 11, (int)py + 8, tel_short(item), QV_DIM, 1);
     }
 
     float gx = px + 12.0f;
