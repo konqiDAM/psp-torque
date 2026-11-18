@@ -123,7 +123,15 @@ app creates itself. Nothing else needs copying.
 
 After copying, press `O` on the console to leave USB mode before unplugging.
 
-## 6. Collecting the log
+`LOG COMPLETO` in the settings menu (on by default, `log_full=` in `settings.txt`) writes
+every command and reply, so a session can be reconstructed later. At the K-line car's
+1.9 req/s that is about 9 KB per minute, which a Memory Stick does not notice.
+
+The end of every session carries a `=== RESUMEN ===` block with the detected car, the
+measured link capacity and plan, the fault-code state and the session counters. Read that
+first; the rest of the file is the detail behind it.
+
+
 
 The log is written every second, so it survives even an abrupt shutdown:
 
