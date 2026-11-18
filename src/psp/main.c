@@ -7772,8 +7772,15 @@ static void run_fallos(int sock)
     g_dtc_mil = -1;
     g_dtc_count = -1;
     snprintf(g_dtc_note, sizeof(g_dtc_note), "%s", tr("LEYENDO"));
+    /* El cartel de red es lo unico que se repinta dentro de las lecturas
+     * bloqueantes: es donde se ve que la app sigue viva. */
+    net_ui_set(g_dtc_note);
 
     if (sock < 0) {
+        /* Sin adaptador no hay nada que leer, y el aviso de "conectando"
+         * tiene que apagarse igual: si no, la barra se queda en CONECT
+         * para siempre. */
+        g_net_busy = 0;
         g_dtc_state = 2;
         snprintf(g_dtc_note, sizeof(g_dtc_note), "%s", tr("SIN ADAPTADOR"));
         return;
