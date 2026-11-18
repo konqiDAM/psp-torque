@@ -145,6 +145,10 @@ static uint16_t g_hidden_mask = 0;  /* bits MODE_* que no se ofrecen (son 9) */
  * la vista es de este coche o la global. */
 static char g_vehicle_id[24] = "";
 static char g_vehicle_name[24] = "";
+
+/* Estado de FALLOS: la barra mira la lampara, asi que esto vive arriba. */
+static int g_dtc_mil = -1;        /* -1 = no se ha leido */
+static int g_dtc_state = 0;       /* 0 sin leer, 1 leyendo, 2 leido */
 static char g_vbat[24] = "?";
 static char g_ssid[32] = "";
 static char g_ip[24] = "";
@@ -5310,6 +5314,7 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms)
     gfx_rect(0, 25, GFX_W, 1,
              theme_is_game() ? theme_accent() : QV_RED);
 
+
     static const int drive_mode[4] = { MODE_QV, MODE_ENGINE, MODE_MOTOR,
                                        MODE_TELEMETRY };
     static const int drive_x[4] = { 6, 80, 140, 196 };
@@ -5395,6 +5400,13 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms)
     }
     gfx_circle((float)(right_x - 9), 12.0f, 4.0f, dot);
     gfx_text(right_x, 8, righttop, state_color, 1);
+
+    /* Lampara de averia: si se han leido los codigos y esta encendida se ve
+     * aqui, sin tener que entrar en FALLOS. Un N/D no es un aviso. */
+    if (g_dtc_mil == 1) {
+        gfx_text(right_x - 8 - gfx_text_width("MIL", 1) - 10, 8, "MIL",
+                 QV_CRIT, 1);
+    }
 
     /* Si el log no se puede abrir hay que decirlo: antes se perdian
      * todas las lineas sin avisar. */
@@ -7693,9 +7705,7 @@ static obd_dtc g_dtc_permanent[DTC_MAX];
 static int g_dtc_stored_n = 0;
 static int g_dtc_pending_n = 0;
 static int g_dtc_permanent_n = 0;
-static int g_dtc_mil = -1;        /* -1 = no se ha leido */
 static int g_dtc_count = -1;
-static int g_dtc_state = 0;       /* 0 sin leer, 1 leyendo, 2 leido */
 static char g_dtc_note[32] = "";
 static int g_dtc_request = 0;
 
