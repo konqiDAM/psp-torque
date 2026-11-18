@@ -11,7 +11,8 @@ OBJS = src/psp/main.o \
        src/core/vehicle.o \
        src/psp/gui.o \
        src/psp/gfx.o \
-       src/psp/audio.o
+       src/psp/audio.o \
+       src/psp/splash_mx5.o
 
 BUILD_PRX = 1
 PSP_FW_VERSION = 660
