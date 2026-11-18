@@ -854,15 +854,23 @@ static int layout_is_factory(void)
     static const int fit_style[DASH_SLOTS] = { STYLE_GAUGE, STYLE_GAUGE,
                                                STYLE_BAR, STYLE_TEXT,
                                                STYLE_TEXT, STYLE_TEXT };
-    static const int fit_tel[TEL_SLOTS] = { W_RPM, W_BOOST, W_ECT,
-                                            W_SPEED, W_OFF };
+    /* Dos juegos validos para las series: el de siempre y el que paso a
+     * ser el defecto en fase2.58 (avance y mariposa). Hace falta aceptar
+     * los dos: una tarjeta que ya tenga el viejo guardado no puede perder
+     * la vista de fabrica, porque es la que hace que el perfil del coche
+     * cambie MAP por MAF, MARCHA y AVANCE. */
+    static const int fit_tel[TEL_SLOTS] = { W_RPM, W_BOOST, W_TIMING,
+                                            W_THR, W_OFF };
+    static const int fit_tel_old[TEL_SLOTS] = { W_RPM, W_BOOST, W_ECT,
+                                                W_SPEED, W_OFF };
     for (int i = 0; i < DASH_SLOTS; i++) {
         if (g_slot_item[i] != fit[i] || g_slot_style[i] != fit_style[i]) {
             return 0;
         }
     }
     for (int i = 0; i < TEL_SLOTS; i++) {
-        if (g_tel_item[i] != fit_tel[i]) {
+        if (g_tel_item[i] != fit_tel[i] &&
+            g_tel_item[i] != fit_tel_old[i]) {
             return 0;
         }
     }
@@ -3645,6 +3653,11 @@ static void build_scheduler(void)
             obd_sched_add(&g_sched, pid, obd_profile_base_period(pid),
                           PROFILE_MOTOR_POLL[i].priority);
         }
+    } else if (g_mask1 != 0 && obd_mask_supports(g_mask1, 0x0E)) {
+        /* En modo rapido el avance tambien entra: es un hueco del GENERAL
+         * en un coche sin MAP y una de las series por defecto del TELEM, y
+         * fuera de la tabla no lo pide nadie, asi que salia N/D. */
+        obd_sched_add(&g_sched, 0x0E, obd_profile_base_period(0x0E), 2);
     }
 
     /* Pedal del acelerador: 0x49 (posicion D) o 0x4A (posicion E)
@@ -6726,6 +6739,13 @@ static void graph_series(const float *hist, float lo, float hi, uint32_t bit,
         if (v > hi) v = hi;
         float x = gx + gw * (float)k / (float)(g_hist_count - 1);
         float y = gy + gh - (v - lo) / (hi - lo) * gh;
+        /* Primer punto de un tramo: la ventana arranca en el, no en cero.
+         * Sin esto el primer segmento salia de y/4, un pico fuera del panel
+         * en el borde izquierdo de cada serie y en cada fotograma. */
+        if (!prev_valid) {
+            y0 = y;
+            y1 = y;
+        }
 
         /* Media movil sobre la linea, no sobre el registro: los numeros de
          * las casillas siguen siendo la medida, pero el trazo deja de salir
@@ -7026,7 +7046,10 @@ static void draw_tel_stat(int item, float x, float y, float w, float h)
 
     if (n > 0) {
         tel_print(item, mx, buf, sizeof(buf));
-        gfx_text((int)x + 6, (int)y + 20, buf, tel_color(item), 2);
+        /* Con seis caracteres ("+11.50", "-12.50") a escala 2 no cabe en 88
+         * px: la casilla se queda sin margen y la ultima se sale. */
+        int big = (strlen(buf) <= 5) ? 2 : 1;
+        gfx_text((int)x + 6, (int)y + 20, buf, tel_color(item), big);
         tel_print(item, mn, small, sizeof(small));
         gfx_text((int)x + 6, (int)y + h - 12, tr("MIN"), QV_DIM, 1);
         gfx_text((int)x + 34, (int)y + h - 12, small, QV_TEXT, 1);
