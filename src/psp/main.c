@@ -704,6 +704,9 @@ static int slot_item_eff(int i)
         if (i == 2) {
             return W_MAF;
         }
+        if (i == 3) {
+            return W_GEAR;
+        }
         if (i == 5) {
             return W_LOAD;
         }
