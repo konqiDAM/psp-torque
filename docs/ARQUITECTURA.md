@@ -229,39 +229,41 @@ El filtro del núcleo (`obd_smooth`) usa constante de tiempo fija
 (`tau = 150 ms`): `alpha = 1 - exp(-dt/tau)`. El retardo es siempre `tau`,
 venga la cadencia como venga.
 
-### 5.5b Interpolación de presentación (fase2.55, rehecha en fase2.56)
+### 5.5b Predicción de la aguja del tacómetro (fase2.55 a fase2.61)
 
-El filtro anterior se aplica **al guardar la muestra**, así que entre dos
-muestras el valor está quieto: en CAN no se nota (un PID vuelve cada 330 ms),
-pero en el K-line de la MX-5 cada valor vuelve cada 1-10 s y la aguja daba un
-salto y se quedaba parada. Eso es lo que parece "lento" aunque el dato sea
-correcto.
+El filtro de 5.5 se aplica **al guardar la muestra**, así que entre dos muestras
+el valor está quieto. En CAN no se nota (un PID vuelve cada 330 ms), pero en el
+K-line de la MX-5 el RPM vuelve cada 1,1 s y la aguja daba un salto y se quedaba
+parada: eso es lo que parece "lento" aunque el dato sea correcto.
 
-`sample_value()` aplica ahora `obd_ramp_step()` en cada fotograma: el valor
-pintado **recorre el escalón entero en línea recta** durante el intervalo de
-muestreo de ese PID (150 ms - 4 s), así que la aguja se mueve durante todo el
-intervalo y llega al valor nuevo al entrar el siguiente. El tramo está topado en
-4 s: un PID que vuelve cada 7 o 10 s recorre el escalón en 4 s y espera la
-muestra siguiente, que es lo que queda de la versión exponencial sin volver a
-pararse al principio.
+Tres intentos, y el bueno es el último:
 
-La primera versión usaba un filtro exponencial con `tau = periodo/3` y no valía:
-cubría el 95 % del escalón en el primer tercio del intervalo y se quedaba parada
-el resto, que en pantalla se ve como "se mueve de golpe y luego nada". El precio
-de la rampa es un intervalo de retraso, y es el que compra el movimiento
-continuo.
+1. **Filtro exponencial** con `tau = periodo/3`: cubría el 95 % del escalón en el
+   primer tercio del intervalo y se quedaba parado el resto. En el coche se ve
+   como "se mueve de golpe y luego nada".
+2. **Rampa lineal** durante todo el intervalo: se movía siempre, pero metía un
+   intervalo entero de retraso — 1,1 s en el RPM, que se nota como que la aguja
+   va por detrás del motor.
+3. **Predicción** (`obd_predict` en `src/core/smooth.c`), y **solo para el RPM**:
+   con la última medida y la velocidad que traía, el valor pintado sigue en la
+   misma dirección hasta que llega la muestra siguiente, y en ese instante vuelve
+   a ser exactamente el valor medido. Tope de 1200 rpm de adelanto, solo durante
+   un intervalo (si la muestra se retrasa, se queda en la última medida), y banda
+   muerta de 25 rpm para que el ralenti no mueva la aguja.
 
-- Solo se acerca a medidas que han llegado: no extrapola.
+El resto de indicadores se pintan con la medida tal cual: con datos que cambian
+despacio, cualquier suavizado se ve artificial (fue la conclusión de verlo en el
+coche).
+
 - La antigüedad y el `N/D` se miden con la marca de la muestra, no con esto, y
   caducan a los tres intervalos del PID tomando el **mayor** entre el intervalo
   real medido (media móvil del hueco entre muestras) y el que promete el plan,
-  con suelo de 6 s y techo de 30: el aire de admisión volvía cada 7 s con la
-  ventana en 9 y salía `N/D` en 11 de 77 muestras (`008`).
-- `sample_value_raw()` es la lectura exacta, y es la que usan el log de estado y
-  el máximo de velocidad: la evidencia no puede ser la animación.
-- Se reinicia al conectar y al cambiar el ajuste, para no arrastrar medio valor.
-- Hoy no se puede apagar: `settings_apply()` fuerza `smooth = 1`. El ajuste
-  existió y la cadena de traducción sigue ahí, pero no hay fila en el menú.
+  con suelo de 6 s y techo de 30.
+- `sample_value_raw()` es la lectura exacta, y es la que usan el log de estado, el
+  número del tacómetro, el indicador de marcha, los avisos de cambio y rojo, el
+  aprendizaje del turbo y el historial de la gráfica: la evidencia y los máximos
+  no pueden ser la animación.
+- Se reinicia al conectar y al cambiar el ajuste.
 
 ### 5.6 Reparto del ancho de banda por pantalla (FASE F3)
 

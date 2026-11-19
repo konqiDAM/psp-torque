@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.60 2026-11-18 cuatro valores financiados, series migradas tambien por coche, tiles limpios"
+#define BUILD_TAG "fase2.61 2026-11-19 aguja con prediccion solo en el RPM, resto con la medida"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -2107,7 +2107,11 @@ static void fmt_1(char *buf, size_t size, float value)
              scaled / 10, scaled % 10);
 }
 
-static obd_ramp g_disp[256];
+/* Solo el RPM se predice: es el unico que cambia lo bastante rapido como
+ * para que el hueco entre muestras se note. El resto se pinta con la
+ * medida tal cual, que es lo que ivan pidio tras verlo en el coche ("solo
+ * queda bien en el RPM, los demas parecen artificiales"). */
+static obd_predict g_pred_rpm;
 
 /* Cadencia real de cada PID: con cuanto tarda de verdad en volver, no con
  * lo que promete el plan. */
@@ -2117,10 +2121,10 @@ static uint32_t g_seen_iv_ms[256];
 static void disp_reset(void)
 {
     for (int i = 0; i < 256; i++) {
-        obd_ramp_reset(&g_disp[i]);
         g_seen_ts[i] = 0;
         g_seen_iv_ms[i] = 0;
     }
+    obd_predict_reset(&g_pred_rpm);
 }
 
 /* Duracion del tramo de presentacion: el intervalo de muestreo de ese PID,
@@ -2237,15 +2241,19 @@ static int sample_value(uint8_t pid, uint32_t now, float *out)
     if (!sample_value_raw(pid, now, out)) {
         return 0;
     }
-    if (!g_cfg.smooth) {
+    if (!g_cfg.smooth || pid != 0x0C) {
+        /* Sin prediccion: el valor medido, tal cual. */
         return 1;
     }
     const obd_sample *sample = obd_store_get(&g_store, pid);
     if (sample == NULL) {
         return 1;
     }
-    *out = obd_ramp_step(&g_disp[pid], sample->value, sample->ts_ms, now,
-                         disp_span_ms(pid));
+    /* 600 rpm de adelanto como mucho, y solo durante un intervalo de
+     * muestreo: si la muestra se retrasa, la aguja se queda en la ultima
+     * medida en vez de seguir subiendo sola. */
+    *out = obd_predict_step(&g_pred_rpm, sample->value, sample->ts_ms, now,
+                            disp_span_ms(pid), 1200.0f, 25.0f);
     return 1;
 }
 
@@ -5064,9 +5072,11 @@ static void history_update(uint32_t now)
                 ok = 1;
             }
         } else if (i == W_THR) {
-            ok = sample_value(g_thr_pid, now, &v);
+            /* La grafica y los maximos son registro: medida cruda, nunca la
+             * prediccion de la aguja. */
+            ok = sample_value_raw(g_thr_pid, now, &v);
         } else {
-            ok = sample_value(g_hist_pid[i], now, &v);
+            ok = sample_value_raw(g_hist_pid[i], now, &v);
         }
 
         hist[g_hist_pos] = ok ? v : 0.0f;
@@ -9233,10 +9243,11 @@ static void draw_screen(uint32_t now, int requests, int data_count,
 
     if (sample_value(0x0C, now, &value)) {
         float raw = 0.0f;
-        fmt_0(d.rpm, sizeof(d.rpm), value);
         d.rpm_valid = 1;
-        d.rpm_val = value;
+        d.rpm_val = value;                    /* aguja: puede ir adelantada */
         d.rpm_raw = sample_value_raw(0x0C, now, &raw) ? raw : value;
+        /* El numero es siempre la medida, nunca la prediccion. */
+        fmt_0(d.rpm, sizeof(d.rpm), d.rpm_raw);
     }
     if (sample_value(0x0B, now, &value)) {
         if (units_imperial()) {

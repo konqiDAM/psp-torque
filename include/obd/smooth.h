@@ -35,34 +35,35 @@ void obd_smooth_reset(obd_smooth *s);
 float obd_smooth_apply(obd_smooth *s, float v, uint32_t ts);
 
 /* ------------------------------------------------------------------ */
-/* Rampa de presentacion.                                             */
+/* Prediccion de presentacion.                                        */
 /* ------------------------------------------------------------------ */
 
-/* Entre dos muestras el valor pintado recorre el escalon **entero** en
- * linea recta durante el intervalo de muestreo, en vez de comerse casi
- * todo en el primer tercio y quedarse quieto: con un filtro de tau =
- * periodo/3 la aguja se movia 300 ms y estaba parada 800, que es
- * exactamente lo que se veia como "no es progresivo".
+/* La aguja no interpola hacia atras: se adelanta. Con la ultima medida y
+ * la velocidad que traia, el valor pintado sigue la misma direccion hasta
+ * que llega la muestra siguiente, y en ese instante vuelve a ser
+ * exactamente el valor medido. Es lo que hace que un tacometro muestreado
+ * a 1 Hz no parezca con un segundo de retraso al acelerar.
  *
  * Reglas:
- *   - Un tramo empieza donde esta la aguja (continuidad, sin saltos).
- *   - Si la muestra tarda mas que el tramo, el valor se queda en el
- *     objetivo: no se extrapola nada.
- *   - span_ms = 0 coloca el valor de golpe.
+ *   - En el instante de la muestra devuelve el valor medido, sin tocar.
+ *   - Entre muestras extrapola con la velocidad estimada, con tope de
+ *     `max_step` unidades y solo durante `span_ms`; despues se queda
+ *     quieto en la ultima medida (no se inventa una rampa infinita).
+ *   - Si el cambio entre muestras es menor que `deadband`, la velocidad se
+ *     toma como cero: el ruido de un ralenti no mueve la aguja.
+ *   - Con una sola muestra no hay velocidad y no se extrapola nada.
  */
 typedef struct {
-    float from;
-    float to;
-    float cur;
-    uint32_t t0;
-    uint32_t span_ms;
-    uint32_t sample_ts;
-    int initialized;
-} obd_ramp;
+    float last;          /* ultima medida */
+    float vel;           /* unidades por segundo */
+    uint32_t last_ts;
+    int samples;
+} obd_predict;
 
-void obd_ramp_reset(obd_ramp *r);
+void obd_predict_reset(obd_predict *p);
 
-float obd_ramp_step(obd_ramp *r, float target, uint32_t sample_ts,
-                    uint32_t now, uint32_t span_ms);
+float obd_predict_step(obd_predict *p, float value, uint32_t sample_ts,
+                       uint32_t now, uint32_t span_ms, float max_step,
+                       float deadband);
 
 #endif

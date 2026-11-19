@@ -97,77 +97,58 @@ static void test_salto_grande(void)
     CHECK(v > 4900.0f);
 }
 
-/* La rampa de presentacion: el escalon se recorre entero durante el
- * intervalo de muestreo, no casi todo al principio. El precio es un
- * intervalo de retraso, que es lo que compra el movimiento continuo. */
-static void test_rampa(void)
+/* La prediccion: la aguja se adelanta con la velocidad que traia, y en el
+ * instante de la muestra se ensena siempre la medida. */
+static void test_prediccion(void)
 {
-    obd_ramp r;
-    obd_ramp_reset(&r);
+    obd_predict p;
+    obd_predict_reset(&p);
 
-    /* Primera muestra: se coloca, no arranca de cero. */
-    CHECK_NEAR(obd_ramp_step(&r, 1000.0f, 1u, 0u, 1000u), 1000.0, 0.001);
+    /* Primera muestra: se coloca y no predice nada. */
+    CHECK_NEAR(obd_predict_step(&p, 1000.0f, 1000u, 1000u, 1000u,
+                                600.0f, 25.0f), 1000.0, 0.001);
 
-    /* Llega la segunda muestra en t=500: la aguja sigue donde estaba y el
-     * tramo empieza ahi (continuidad, sin salto). */
-    CHECK_NEAR(obd_ramp_step(&r, 2000.0f, 2u, 500u, 1000u), 1000.0, 0.001);
-    /* A mitad del tramo, mitad de camino. */
-    CHECK_NEAR(obd_ramp_step(&r, 2000.0f, 2u, 1000u, 1000u), 1500.0, 0.001);
-    /* Y al final del tramo, en el objetivo. */
-    CHECK_NEAR(obd_ramp_step(&r, 2000.0f, 2u, 1500u, 1000u), 2000.0, 0.001);
+    /* Sube 500 rpm en un segundo: la velocidad es 500 rpm/s. A mitad del
+     * intervalo la aguja debe ir por delante de la ultima medida. */
+    obd_predict_step(&p, 1500.0f, 2000u, 2000u, 1000u, 600.0f, 25.0f);
+    float mid = obd_predict_step(&p, 1500.0f, 2000u, 2500u, 1000u,
+                                 600.0f, 25.0f);
+    CHECK(mid > 1500.0f);
+    CHECK(mid <= 2100.0f);
 
-    /* Si la muestra tarda mas que el tramo, se queda en el objetivo: no se
-     * extrapola nada. */
-    CHECK_NEAR(obd_ramp_step(&r, 2000.0f, 2u, 9000u, 1000u), 2000.0, 0.001);
+    /* Pasado el intervalo, se queda en la medida: no sigue subiendo. */
+    CHECK_NEAR(obd_predict_step(&p, 1500.0f, 2000u, 4000u, 1000u,
+                                600.0f, 25.0f), 1500.0, 0.001);
 
-    /* Muestra nueva a mitad de camino: el tramo arranca desde donde esta la
-     * aguja, no desde el valor viejo. */
-    obd_ramp_reset(&r);
-    obd_ramp_step(&r, 0.0f, 1u, 0u, 1000u);
-    CHECK_NEAR(obd_ramp_step(&r, 100.0f, 2u, 500u, 1000u), 0.0, 0.001);
-    CHECK_NEAR(obd_ramp_step(&r, 100.0f, 2u, 1000u, 1000u), 50.0, 0.001);
-    float hold = obd_ramp_step(&r, 200.0f, 3u, 1000u, 1000u);
-    CHECK_NEAR(hold, 50.0, 0.001);
-    CHECK_NEAR(obd_ramp_step(&r, 200.0f, 3u, 1500u, 1000u), 125.0, 0.001);
+    /* Muestra nueva: se ensena la medida exacta, sin mezcla. */
+    CHECK_NEAR(obd_predict_step(&p, 2000.0f, 3000u, 3000u, 1000u,
+                                600.0f, 25.0f), 2000.0, 0.001);
 
-    /* Mismo instante de muestra y otro objetivo: el tramo se rehace desde
-     * la aguja y adopta el tramo nuevo. */
-    obd_ramp_reset(&r);
-    obd_ramp_step(&r, 0.0f, 9u, 0u, 1000u);
-    CHECK_NEAR(obd_ramp_step(&r, 100.0f, 10u, 0u, 1000u), 0.0, 0.001);
-    CHECK_NEAR(obd_ramp_step(&r, 100.0f, 10u, 500u, 1000u), 50.0, 0.001);
-    /* Mismo ts y mismo objetivo, pero tramo mas largo: tambien se rehace. */
-    CHECK_NEAR(obd_ramp_step(&r, 100.0f, 10u, 500u, 2000u), 50.0, 0.001);
-    CHECK_NEAR(obd_ramp_step(&r, 100.0f, 10u, 1500u, 2000u), 75.0, 0.001);
+    /* Bajando, igual pero al reves. */
+    obd_predict_step(&p, 1000.0f, 4000u, 4000u, 1000u, 600.0f, 25.0f);
+    float down = obd_predict_step(&p, 1000.0f, 4000u, 4500u, 1000u,
+                                  600.0f, 25.0f);
+    CHECK(down < 1000.0f);
 
-    /* Dos lecturas en el mismo fotograma no mueven nada la segunda vez. */
-    obd_ramp_reset(&r);
-    obd_ramp_step(&r, 0.0f, 20u, 0u, 1000u);
-    obd_ramp_step(&r, 100.0f, 21u, 0u, 1000u);
-    float once = obd_ramp_step(&r, 100.0f, 21u, 250u, 1000u);
-    float twice = obd_ramp_step(&r, 100.0f, 21u, 250u, 1000u);
-    CHECK_NEAR(once, twice, 0.0001);
+    /* Y nunca por debajo de cero. */
+    obd_predict_reset(&p);
+    obd_predict_step(&p, 50.0f, 1000u, 1000u, 1000u, 600.0f, 0.0f);
+    obd_predict_step(&p, 0.0f, 2000u, 2000u, 1000u, 600.0f, 0.0f);
+    float low = obd_predict_step(&p, 0.0f, 2000u, 2500u, 1000u,
+                                 600.0f, 0.0f);
+    CHECK(low >= 0.0f);
+}
 
-    /* Desbordamiento del contador de milisegundos. */
-    obd_ramp_reset(&r);
-    obd_ramp_step(&r, 0.0f, 30u, 0xFFFFFE00u, 1000u);
-    obd_ramp_step(&r, 100.0f, 31u, 0xFFFFFE00u, 1000u);
-    float wrap = obd_ramp_step(&r, 100.0f, 31u, 0x00000100u, 1000u);
-    CHECK(wrap > 0.0f);
-    CHECK(wrap < 100.0f);
-
-    /* Un tramo de duracion cero coloca el valor de golpe. */
-    CHECK_NEAR(obd_ramp_step(&r, 900.0f, 4u, 600u, 0u), 900.0, 0.001);
-
-    /* Nunca se sale del intervalo entre el valor viejo y el nuevo. */
-    obd_ramp_reset(&r);
-    obd_ramp_step(&r, 0.0f, 1u, 0u, 1000u);
-    obd_ramp_step(&r, 100.0f, 2u, 0u, 1000u);
-    for (uint32_t t = 0; t <= 2000u; t += 16u) {
-        float v = obd_ramp_step(&r, 100.0f, 2u, t, 1000u);
-        CHECK(v >= -0.001f);
-        CHECK(v <= 100.001f);
-    }
+/* El ralenti no mueve la aguja: por debajo de la banda muerta la velocidad
+ * es cero y no hay adelanto. */
+static void test_prediccion_ruido(void)
+{
+    obd_predict p;
+    obd_predict_reset(&p);
+    obd_predict_step(&p, 900.0f, 1000u, 1000u, 1000u, 600.0f, 25.0f);
+    obd_predict_step(&p, 915.0f, 2000u, 2000u, 1000u, 600.0f, 25.0f);
+    CHECK_NEAR(obd_predict_step(&p, 915.0f, 2000u, 2500u, 1000u,
+                                600.0f, 25.0f), 915.0, 0.001);
 }
 
 void test_smooth(void)
@@ -178,5 +159,6 @@ void test_smooth(void)
     test_convergencia_con_tau();
     test_retraso_independiente_de_la_cadencia();
     test_salto_grande();
-    test_rampa();
+    test_prediccion();
+    test_prediccion_ruido();
 }
