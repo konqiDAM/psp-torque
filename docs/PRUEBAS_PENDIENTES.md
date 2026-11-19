@@ -120,7 +120,24 @@ validity window tracks the real interval.
 **Done when:** a log shows which REPARTO gives the best needle with the tiles alive, and
 that number becomes the default.
 
-### T18 — The `-1` on the advance tile
+**Measured at REPARTO 3 (`phase1_012`, fase2.63, 68 s at idle):** 84 rpm samples over
+62 s of link time, one every **0.74 s** against the 0.702 s the plan asked for; the four
+drawn values came back at 5.2-5.7 s and the intake air at 9.7 s, exactly as the split
+predicts. 151 requests, 151 answers, 0 `NO DATA`, 0 timeouts, link delivered 2.22-2.50
+req/s with the plan asking 2.12. For comparison, `phase1_011` (fase2.62) measured 0.82 s
+and `phase1_010` (fase2.60) 1.10 s with the same method. What is left on the table: 19
+of the 151 requests went to PIDs that are not on the GENERAL screen (they are all due at
+connect because their 60 s period starts expired), which is ~12 % of the link spent in
+the first minute; REPARTO 2 would plan 0.656 s instead of 0.702 s. Not closed: no load
+test yet.
+
+### T18 — The `-1` on the advance tile (answered)
+
+**Answer (log `phase1_011`, fase2.62):** the ECU really sent it. That log holds one
+`410E7E` reply out of 39 `010E` answers, and `0x7E` is the only raw byte that decodes to
+exactly -1.0 (`A/2 - 64`). The tile was showing a real measurement, not a bug: the app
+draws the advance with the measurement as it arrived. Nothing to fix; kept here as the
+record of why the number was right.
 
 **Why:** he saw the advance move to values like -1 in the `fase2.61`/`fase2.62` drive.
 The log for that session is not here, and the two logs that are (`phase1_010`, fase2.60)
