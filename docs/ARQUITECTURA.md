@@ -248,7 +248,8 @@ Tres intentos, y el bueno es el último:
    con la última medida y la velocidad que traía, el valor pintado sigue en la
    misma dirección hasta que llega la muestra siguiente, y en ese instante vuelve
    a ser exactamente el valor medido. Tope de 1200 rpm de adelanto, solo durante
-   un intervalo (si la muestra se retrasa, se queda en la última medida), y banda
+   un intervalo (si la muestra se retrasa, la aguja **se queda donde llegó**, no
+   vuelve atrás), y banda
    muerta de 25 rpm para que el ralenti no mueva la aguja.
 
 El resto de indicadores se pintan con la medida tal cual: con datos que cambian

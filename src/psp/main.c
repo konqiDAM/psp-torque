@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.61 2026-11-19 aguja con prediccion solo en el RPM, resto con la medida"
+#define BUILD_TAG "fase2.62 2026-11-19 prediccion sin salto atras, pico y avisos con la medida"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -2208,12 +2208,12 @@ static uint32_t sample_valid_ms(uint8_t pid)
     return v;
 }
 
-/* Presentacion: el valor que se pinta no salta al llegar la muestra,
- * se mueve hacia ella en cada fotograma. En este enlace un PID vuelve
- * cada 1-10 s, asi que sin esto la aguja da un salto cada varios segundos
- * y el resto del tiempo esta quieta, que es lo que parece "lento" aunque
- * el dato sea correcto. Es solo presentacion: la antiguedad se sigue
- * midiendo con la marca de la muestra, no con esto. */
+/* Presentacion: SOLO el RPM se predice. En este enlace el RPM vuelve cada
+ * 1-2 s, asi que entre muestra y muestra la aguja se quedaba quieta y
+ * parecia que iba un segundo por detras del motor. El resto de valores se
+ * pintan con la medida tal cual: con datos que cambian despacio, cualquier
+ * suavizado se ve artificial. La antiguedad se sigue midiendo con la marca
+ * de la muestra, no con esto. */
 
 /* Lectura exacta, sin suavizado: la medida tal cual llego. Es la que va
  * al log y a los maximos, que son registro y no presentacion. */
@@ -2235,7 +2235,8 @@ static int sample_value_raw(uint8_t pid, uint32_t now, float *out)
 
 /* Lectura para pintar: el valor se mueve hacia la muestra en cada
  * fotograma, asi que la aguja no salta ni se queda quieta entre dos
- * datos. La antiguedad y el N/D se siguen midiendo en sample_value_raw. */
+ * datos (solo el 0x0C, ver obd_predict). La antiguedad y el N/D se miden
+ * en sample_value_raw. */
 static int sample_value(uint8_t pid, uint32_t now, float *out)
 {
     if (!sample_value_raw(pid, now, out)) {
@@ -2249,9 +2250,9 @@ static int sample_value(uint8_t pid, uint32_t now, float *out)
     if (sample == NULL) {
         return 1;
     }
-    /* 600 rpm de adelanto como mucho, y solo durante un intervalo de
-     * muestreo: si la muestra se retrasa, la aguja se queda en la ultima
-     * medida en vez de seguir subiendo sola. */
+    /* 1200 rpm de adelanto como mucho (unos 1100 rpm/s a esta cadencia), y
+     * solo durante un intervalo de muestreo: si la muestra se retrasa, la
+     * aguja se queda donde llego en vez de seguir subiendo sola. */
     *out = obd_predict_step(&g_pred_rpm, sample->value, sample->ts_ms, now,
                             disp_span_ms(pid), 1200.0f, 25.0f);
     return 1;
@@ -3415,7 +3416,7 @@ static void maybe_capture_key_on(uint32_t now, uint32_t session_ms)
     float speed_value = 0.0f;
 
     if (!sample_value(0x0B, now, &map_value) ||
-        !sample_value(0x0C, now, &rpm_value)) {
+        !sample_value_raw(0x0C, now, &rpm_value)) {
         return;
     }
 
@@ -4875,7 +4876,7 @@ static void run_scan(int sock)
 typedef struct {
     char rpm[16];
     int rpm_valid;
-    float rpm_val;   /* con rampa: posicion de la aguja */
+    float rpm_val;   /* con prediccion: posicion de la aguja */
     float rpm_raw;   /* medida exacta: avisos y umbrales */
 
     char speed[16];
@@ -6260,10 +6261,10 @@ static void widget_view_fill(const dash_data *d, int item, widget_view *wv)
         const obd_vehicle_profile *vp = obd_vehicle_by_id(g_vehicle_id);
         int gear = 0;
         if (vp != NULL && d->rpm_valid && d->speed_valid) {
-            /* Con la medida exacta: la rampa retrasa rpm y velocidad
-             * distinto, y con aceleracion fuerte el cociente se sale del 10 %
-             * que obd_vehicle_gear deja pasar, asi que la marcha
-             * desaparecia justo al acelerar. */
+            /* Con la medida exacta: la aguja va adelantada, y con
+             * aceleracion fuerte el cociente se sale del 10 % que
+             * obd_vehicle_gear deja pasar, asi que la marcha desaparecia
+             * justo al acelerar. */
             gear = obd_vehicle_gear(vp->gear_kmh, d->rpm_raw, d->speed_raw);
         }
         if (gear > 0) {
@@ -8940,7 +8941,7 @@ static void draw_theme_fx(const dash_data *d, uint32_t now)
          * 150 rpm antes de la zona roja como siempre. */
         float warn_rpm = g_profile_cut > 0 ? (float)g_profile_cut - 300.0f
                                           : redline_rpm() - 150.0f;
-        if (d->rpm_valid && d->rpm_val >= warn_rpm && ((now / 140u) & 1u)) {
+        if (d->rpm_valid && d->rpm_raw >= warn_rpm && ((now / 140u) & 1u)) {
             gfx_border(0, 0, (float)GFX_W, (float)GFX_H, 2.0f, QV_RED);
         }
     }
@@ -9402,8 +9403,10 @@ static void draw_screen(uint32_t now, int requests, int data_count,
     }
 
     if (g_cfg.peak_hold) {
-        if (d.rpm_valid && d.rpm_val > g_peak_rpm) {
-            g_peak_rpm = d.rpm_val;
+        /* Con la medida: la aguja puede ir adelantada hasta 1200 rpm y el
+         * pico no puede quedarse con un numero que el motor no dio. */
+        if (d.rpm_valid && d.rpm_raw > g_peak_rpm) {
+            g_peak_rpm = d.rpm_raw;
         }
         if (d.boost_valid && d.boost_val > g_peak_boost) {
             g_peak_boost = d.boost_val;

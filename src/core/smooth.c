@@ -48,10 +48,13 @@ float obd_predict_step(obd_predict *p, float value, uint32_t sample_ts,
                 p->vel = 0.0f;
             } else {
                 p->vel = d * 1000.0f / (float)dt;
-                /* Un salto de una sola muestra no puede disparar la aguja
-                 * a cualquier sitio: el tope es el mismo que la
-                 * extrapolacion. */
-                float vmax = max_step * 1000.0f / (float)span_ms;
+                /* La velocidad se limita a lo que la aguja puede recorrer
+                 * en un tramo: un salto entre dos muestras no puede
+                 * dispararla a cualquier sitio. */
+                float vmax = 0.0f;
+                if (span_ms > 0u) {
+                    vmax = max_step * 1000.0f / (float)span_ms;
+                }
                 if (p->vel > vmax) {
                     p->vel = vmax;
                 }
@@ -70,12 +73,22 @@ float obd_predict_step(obd_predict *p, float value, uint32_t sample_ts,
         return value;
     }
 
-    uint32_t age = now - p->last_ts;
-    if (span_ms == 0u || age >= span_ms) {
+    if (span_ms == 0u) {
         return p->last;
     }
 
+    /* Si la muestra se retrasa, la aguja se queda donde llego, no vuelve
+     * atras: devolver `last` al agotarse el tramo daba un salto hacia atras
+     * de hasta el tope cada vez que el hueco real pasaba de la media (37 %
+     * de los huecos de la MX-5). */
+    uint32_t age = now - p->last_ts;
+    if (age > span_ms) {
+        age = span_ms;
+    }
+
     float pred = p->last + p->vel * (float)age / 1000.0f;
+    /* Tope de posicion: con la velocidad ya limitada no puede pasarse, pero
+     * se deja como red por si alguien toca el limite de velocidad. */
     float hi = p->last + max_step;
     float lo = p->last - max_step;
     if (pred > hi) {

@@ -319,15 +319,16 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
   the plan targets 16.5 requests/s; on the MX-5's K-line, 2.2 (383 ms per
   request is 2.6 physical). A core test computes the demand and fails if it goes
   over budget.
-- **Display interpolation:** between samples, the drawn value walks the whole
-  step in a straight line across that PID's sampling interval, so the needle
-  moves for the whole interval and reaches the new value as the next sample
-  arrives. The walk is capped at 4 s: anything slower arrives early and waits.
-  It costs one interval of lag, which is the price of continuous motion. It
-  never extrapolates: if a sample does not arrive the value stays where it is,
-  and a stale value still becomes `N/D`.
-- **A 150 ms filter on the sample**, separate from the interpolation: it
-  removes noise from the measurement itself when it is stored.
+- **Tachometer needle prediction:** between samples the needle keeps moving in
+  the direction it was already going, so it does not trail the engine by a full
+  second, and the moment a measurement arrives the needle is exactly that
+  measurement. The lead is capped (1200 rpm), lasts one interval only, and holds
+  where it got to if the sample is late; below 25 rpm of change nothing is
+  predicted, so idle does not move the needle. The printed number, the session
+  peak and the shift and redline warnings are always the measurement, never the
+  prediction. Every other gauge is drawn with the measurement as it arrives.
+- **A 150 ms filter on the sample:** it removes noise from the measurement
+  itself when it is stored.
 - **VBlank cadence:** drawing is synchronised with `sceDisplayGetVcount()`
   instead of with timers, and the number of VBlanks per frame adapts
   automatically to the CPU load.

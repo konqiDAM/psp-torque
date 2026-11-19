@@ -323,15 +323,16 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
   entrega de verdad y sube o baja ese presupuesto cada 10 s. En CAN se planifica
   a 16,5 peticiones/s; en el K-line de la MX-5, a 2,2 (383 ms por petición son
   2,6 físicos). Un test del núcleo calcula la demanda y falla si se pasa.
-- **Interpolación de presentación:** entre dos muestras el valor pintado
-  recorre el escalón entero en línea recta durante el intervalo de muestreo de
-  ese PID, así que la aguja se mueve durante todo el intervalo y llega al valor
-  nuevo al entrar el siguiente. El tramo está topado en 4 s: lo que vuelve más
-  despacio llega antes y espera. Cuesta un intervalo de retraso, que es el precio
-  del movimiento continuo. No extrapola: si una muestra no llega, el valor se
-  queda donde está, y si envejece se sigue mostrando `N/D`.
-- **Filtro de 150 ms sobre la muestra**, aparte de la interpolación: quita el
-  ruido del propio dato en el momento de guardarlo.
+- **Aguja del tacómetro con predicción:** entre dos muestras la aguja sigue en
+  la dirección que traía, así que no va un segundo por detrás del motor, y en el
+  instante en que llega la medida vuelve a ser exactamente esa medida. El
+  adelanto está topado (1200 rpm), solo dura un intervalo y se queda donde llega
+  si la muestra se retrasa; por debajo de 25 rpm de cambio no se adelanta nada,
+  para que el ralenti no mueva la aguja. El número del tacómetro, el pico de la
+  sesión y los avisos de cambio y de zona roja son siempre la medida, nunca la
+  predicción. Los demás indicadores se pintan con la medida tal cual.
+- **Filtro de 150 ms sobre la muestra:** quita el ruido del propio dato en el
+  momento de guardarlo.
 - **Cadencia por VBlank:** el dibujo se sincroniza con `sceDisplayGetVcount()`
   en lugar de con temporizadores, y el número de VBlanks por fotograma se
   ajusta solo según la carga de CPU.

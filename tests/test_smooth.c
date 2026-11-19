@@ -113,12 +113,19 @@ static void test_prediccion(void)
     obd_predict_step(&p, 1500.0f, 2000u, 2000u, 1000u, 600.0f, 25.0f);
     float mid = obd_predict_step(&p, 1500.0f, 2000u, 2500u, 1000u,
                                  600.0f, 25.0f);
-    CHECK(mid > 1500.0f);
-    CHECK(mid <= 2100.0f);
+    /* 500 rpm/s durante 500 ms: exactamente 1750, sin tope. */
+    CHECK_NEAR(mid, 1750.0, 0.01);
 
-    /* Pasado el intervalo, se queda en la medida: no sigue subiendo. */
+    /* Pasado el intervalo no vuelve atras: se queda donde llego (1500 +
+     * 500 rpm/s * 1 s = 2000), que es el tope del tramo. Antes devolvia la
+     * medida y la aguja daba un salto hacia atras de hasta el tope. */
     CHECK_NEAR(obd_predict_step(&p, 1500.0f, 2000u, 4000u, 1000u,
-                                600.0f, 25.0f), 1500.0, 0.001);
+                                600.0f, 25.0f), 2000.0, 0.001);
+    /* Y en el tramo exacto tampoco hay discontinuidad. */
+    CHECK_NEAR(obd_predict_step(&p, 1500.0f, 2000u, 3000u, 1000u,
+                                600.0f, 25.0f),
+               obd_predict_step(&p, 1500.0f, 2000u, 3001u, 1000u,
+                                600.0f, 25.0f), 0.01);
 
     /* Muestra nueva: se ensena la medida exacta, sin mezcla. */
     CHECK_NEAR(obd_predict_step(&p, 2000.0f, 3000u, 3000u, 1000u,
