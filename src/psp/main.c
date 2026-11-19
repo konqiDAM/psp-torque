@@ -60,7 +60,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.43 2026-11-16 FASE F1+F3+F2.5 hueco ajustable, reparto por pantalla y edad global"
+#define BUILD_TAG "fase2.44 2026-11-19 correccion: hueco real 8ms y handshake sin mascara"
 #define CMD_TIMEOUT_MS 500
 /* Si el adaptador ha demostrado que envia el prompt '>', hay que esperarlo
  * antes de mandar el siguiente comando. El ELM327 hace tareas internas
@@ -2652,6 +2652,28 @@ static int connect_network_and_elm(Target *targets, int *target_count,
             break;
         }
         log_file_printf("Handshake: 0100 sin mascara, se reintenta\n");
+    }
+
+    /* FASE F: un ELM327 recien alimentado puede responder 0100 con
+     * 00000000 mientras todavia esta fijando el protocolo. Antes se
+     * repetia la secuencia AT completa 2 veces y se seguia con 12 PIDs,
+     * es decir, con un dashboard incompleto. Se reintenta SOLO la
+     * mascara, con una pausa de 250 ms y un timeout mas corto, antes
+     * de rendirse. */
+    if (g_mask1 == 0) {
+        for (int extra = 0; extra < 2 && !g_connect_cancel; extra++) {
+            sceKernelDelayThread(250 * 1000);
+            elm_flush_input(sock);
+            elm_send_and_read(sock, "0100", 2000, &reply);
+            if (reply.data && reply.frame.data_len >= 4) {
+                g_mask1 = obd_pid_mask(reply.frame.data, reply.frame.data_len);
+            }
+            log_file_printf("mascara 0100 (reintento extra %d): %08X\n",
+                            extra + 1, (unsigned)g_mask1);
+            if (g_mask1 != 0) {
+                break;
+            }
+        }
     }
 
     if (g_connect_cancel) {
@@ -7827,14 +7849,21 @@ static void run_dashboard(Target *targets, int target_count)
         int draw_due = ((uint32_t)(vc - g_perf_last_vcount) >=
                         (uint32_t)(target_vb - 1));
 
-        if (draw_due) {
+        /* FASE F (correccion tras phase1_076/077): el hueco minimo del
+         * ELM327 tiene prioridad sobre el dibujado. Antes se comprobaba
+         * `draw_due` primero y, como un frame tarda ~33 ms, el hueco
+         * configurado de 8 ms se media como 41 ms: la capacidad cayo de
+         * ~12 a ~10 peticiones/s. Con el order invertido el hueco real
+         * es de 8-10 ms y el dibujo se recupera en el siguiente VBlank. */
+        if (gap_pending) {
+            sceKernelDelayThread(2000);
+        } else if (draw_due) {
             draw_screen(now, requests, data_count,
                         no_data_count, timeouts, last_rtt);
-        } else if (rx.active || rx_just_done || gap_pending) {
-            /* Con una peticion en vuelo, o esperando el hueco minimo del
-             * adaptador, se duerme 2 ms en vez de un VBlank (16,7 ms).
-             * El dibujo no se resiente: su cadencia sigue la cuenta de
-             * VBlanks, no la del bucle. */
+        } else if (rx.active || rx_just_done) {
+            /* Con una peticion en vuelo se duerme 2 ms en vez de un
+             * VBlank (16,7 ms). La cadencia del dibujo no depende del
+             * bucle, sino de la cuenta de VBlanks. */
             sceKernelDelayThread(2000);
         } else {
             /* Nada que dibujar: un VBlank como referencia. */

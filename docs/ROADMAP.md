@@ -224,6 +224,23 @@ Criterios de aceptacion:
 - [ ] El RPM se refresca a >= 4,5 Hz en el coche y no quedan STOPPED con
       el hueco calibrado.
 
+## Fase 2.9 — Correcciones tras la calibracion en coche (fase2.44)
+
+Datos: `phase1_075`..`phase1_078` (19-nov), con `elm_gap=8`.
+
+- [x] **El hueco configurado no se aplicaba.** Con `gapcfg=8` el log media
+  `gap=41` ms: la cadencia de dibujo se comprobaba antes que la espera del
+  hueco y un frame (~33 ms) se comia el intervalo. Capacidad caida de ~12
+  a ~10 peticiones/s. Se da prioridad al hueco: se duerme 2 ms hasta que
+  vence y el dibujo se recupera en el siguiente VBlank.
+- [x] **Handshake con mascara 00000000.** Un ELM327 recien alimentado
+  respondia `0100` con mascara 0 y la app arrancaba con solo 12 PIDs en
+  vez de 17. Se anaden 2 reintentos de la mascara, con 250 ms de pausa,
+  antes de rendirse.
+- [ ] Seguir monitorizando: en `phase1_077` aparecieron 2459 `STOPPED` y
+  750 `SEARCHING` con 4 cortes de enlace. La escalada por atasco ya los
+  recupera, pero conviene confirmar que con el hueco arreglado bajan.
+
 ## Fase 3 — Parámetros específicos Alfa Romeo (investigación)
 
 Tareas:
