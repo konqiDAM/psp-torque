@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.62 2026-11-19 prediccion sin salto atras, pico y avisos con la medida"
+#define BUILD_TAG "fase2.63 2026-11-19 aguja sin prediccion, REPARTO y AGUJA ajustables"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -168,12 +168,6 @@ static int g_elm_prompt_seen = 0;
 static float g_peak_rpm = 0.0f;
 static float g_peak_speed = 0.0f;
 static float g_peak_boost = 0.0f;
-
-/* Suavizado EMA con constante de tiempo fija (FASE E3). */
-static obd_smooth g_ema_rpm;
-static obd_smooth g_ema_map;
-static obd_smooth g_ema_speed;
-static obd_smooth g_ema_thr;
 
 /* ------------------------------------------------------------------ */
 /* Estado de la UI grafica.                                           */
@@ -476,6 +470,7 @@ static void scan_refresh_proto(int sock, const char *tag);
 static void run_scan(int sock);
 static void draw_modules(void);
 static void build_scheduler(void);
+static void apply_screen_schedule(uint32_t now);
 static void demo_apply_flags(int on);
 static float clamp_float(float v, float lo, float hi);
 
@@ -488,7 +483,8 @@ typedef struct {
     int anim;       /* 1 = animacion de arranque */
     int fast;       /* 0 = completo, 1 = modo rapido */
     int peak_hold;  /* 1 = mostrar pico maximo */
-    int smooth;     /* 1 = suavizado de datos */
+    int needle;     /* 0 = directa, 1 = suave 150 ms, 2 = muy suave 400 ms */
+    int split_values; /* valores rapidos en pantalla: 0..4 (0 = solo RPM) */
     int shift_rpm;  /* RPM para shift light */
     int rpm_max;    /* fondo de escala del tacometro */
     int units;      /* 0 = metrico, 1 = imperial */
@@ -503,7 +499,7 @@ typedef struct {
     char profile[24]; /* perfil forzado (vehicle.h); vacio = autodetectar */
 } app_settings;
 
-static app_settings g_cfg = { 0, 0, 0, 1, 1, 0, 1, 0,
+static app_settings g_cfg = { 0, 0, 0, 1, 1, 0, 1, 1, 3,
                               4000, 7000, 0, 1, 0, 15, 100, 9, 1, 0, 1, "" };
 
 /* FASE F1: hueco minimo entre el fin de una respuesta y el envio del
@@ -1064,6 +1060,14 @@ static const char *tr(const char *key)
         { "X: GUARDAR  START: CERRAR  MANTENER START: SALIR",
           "X: SAVE  START: CLOSE  HOLD START: EXIT" },
         { "LOG COMPLETO", "FULL LOG" },
+        { "AGUJA", "NEEDLE" },
+        { "REPARTO", "SPLIT" },
+        { "DIRECTA", "DIRECT" },
+        { "SUAVE", "SOFT" },
+        { "MUY SUAVE", "VERY SOFT" },
+        { "SIN CUPO", "NO QUOTA" },
+        { "VALOR", "VALUE" },
+        { "VALORES", "VALUES" },
         { "Codigos de averia", "Fault codes" },
         { "GUARDADOS", "STORED" },
         { "PENDIENTES", "PENDING" },
@@ -1086,8 +1090,10 @@ static const char *tr(const char *key)
     return key;
 }
 
-#define SET_COUNT 19
-#define SET_EXIT  18
+#define SET_COUNT 21
+#define SET_NEEDLE 18
+#define SET_SPLIT  19
+#define SET_EXIT   20
 
 static int g_settings_open = 0;
 static int g_settings_sel = 0;
@@ -1339,7 +1345,6 @@ static char *trim_in_place(char *s)
 
 static void settings_apply(void)
 {
-    g_cfg.smooth = 1;   /* suavizado siempre activo */
     /* Idioma efectivo. */
     if (g_cfg.lang == 0) {
         g_lang = (g_psp_lang == PSP_SYSTEMPARAM_LANGUAGE_SPANISH) ? 0 : 1;
@@ -1350,16 +1355,13 @@ static void settings_apply(void)
     int preset = (g_cfg.theme == 0) ? g_cfg.color : g_cfg.theme;
     gfx_theme_apply(preset, g_cfg.contrast);
     audio_set_gap_ms(g_cfg.chime_gap * 100);
-    if (!g_cfg.smooth) {
-        obd_smooth_reset(&g_ema_rpm);
-        obd_smooth_reset(&g_ema_map);
-        obd_smooth_reset(&g_ema_speed);
-        obd_smooth_reset(&g_ema_thr);
-    }
     /* Al cambiar el ajuste, el valor presentado no puede quedarse a medio
      * camino del anterior. */
     disp_reset();
     if (g_link_connected) {
+        /* build_scheduler vuelve a montar la tabla y termina repartiendo
+         * con el plan de la pantalla activa, asi que un cambio de ajuste
+         * (AGUJA, REPARTO, tema) llega al enlace en el acto. */
         build_scheduler();
         obd_sched_reset_due(&g_sched, now_ms());
     }
@@ -1616,14 +1618,14 @@ static void settings_load(void)
     g_cfg.anim = 1;
     g_cfg.fast = 0;
     g_cfg.peak_hold = 1;
-    g_cfg.smooth = 0;
+    g_cfg.needle = 1;
+    g_cfg.split_values = 3;
     g_cfg.shift_rpm = 4000;
     g_cfg.rpm_max = 7000;
     g_cfg.units = 0;
     g_cfg.boost_auto = 1;
     g_cfg.boost_peak = 0;
     g_cfg.boost_max = 15;
-    g_cfg.smooth = 1;   /* suavizado forzado */
     g_cfg.chime_kmh = 100;
     g_cfg.chime_gap = 9;
     g_cfg.debug = 0;
@@ -1711,9 +1713,18 @@ static void settings_load(void)
                 } else if (strcmp(key, "pico") == 0 ||
                            strcmp(key, "peak") == 0) {
                     g_cfg.peak_hold = atoi(val) ? 1 : 0;
+                } else if (strcmp(key, "aguja") == 0 ||
+                           strcmp(key, "needle") == 0) {
+                    g_cfg.needle = atoi(val);
                 } else if (strcmp(key, "suavizado") == 0 ||
                            strcmp(key, "smooth") == 0) {
-                    g_cfg.smooth = atoi(val) ? 1 : 0;
+                    /* Clave antigua: 1 era el suavizado forzado, que ahora
+                     * es AGUJA 1; 0 pasa a AGUJA 0. */
+                    g_cfg.needle = atoi(val) ? 1 : 0;
+                } else if (strcmp(key, "reparto") == 0 ||
+                           strcmp(key, "split") == 0 ||
+                           strcmp(key, "split_values") == 0) {
+                    g_cfg.split_values = atoi(val);
                 } else if (strcmp(key, "shift") == 0 ||
                            strcmp(key, "shift_rpm") == 0) {
                     g_cfg.shift_rpm = atoi(val);
@@ -1811,7 +1822,10 @@ static void settings_load(void)
     }
     g_cfg.fast = g_cfg.fast ? 1 : 0;
     g_cfg.peak_hold = g_cfg.peak_hold ? 1 : 0;
-    g_cfg.smooth = g_cfg.smooth ? 1 : 0;
+    if (g_cfg.needle < 0) g_cfg.needle = 0;
+    if (g_cfg.needle > 2) g_cfg.needle = 2;
+    if (g_cfg.split_values < 0) g_cfg.split_values = 0;
+    if (g_cfg.split_values > 4) g_cfg.split_values = 4;
     g_cfg.units = g_cfg.units ? 1 : 0;
     g_cfg.boost_auto = g_cfg.boost_auto ? 1 : 0;
     if (g_cfg.boost_peak < 0) g_cfg.boost_peak = 0;
@@ -1935,7 +1949,9 @@ static void settings_save(void)
                      "# animacion: 0=NO 1=MITO 2=MX-5\n"
                      "# rapido: 0=COMPLETO 1=RAPIDO\n"
                      "# pico: 0=NO 1=SI\n"
-                     "# suavizado: 0=NO 1=SI\n"
+                     "# aguja: 0=DIRECTA 1=SUAVE 2=MUY SUAVE\n"
+                     "# reparto: valores rapidos en pantalla 0..4 "
+                     "(0 = solo RPM)\n"
                      "# shift: RPM para shift light\n"
                      "# rpm_max: fondo de escala del tacometro\n"
                      "# (la zona roja es automatica: rpm_max - 500)\n"
@@ -1954,7 +1970,8 @@ static void settings_save(void)
                      "animacion=%d\n"
                      "rapido=%d\n"
                      "pico=%d\n"
-                     "suavizado=%d\n"
+                     "aguja=%d\n"
+                     "reparto=%d\n"
                      "shift=%d\n"
                      "rpm_max=%d\n"
                      "unidades=%d\n"
@@ -1983,7 +2000,8 @@ static void settings_save(void)
                      "hidden=%s\n",
                      g_cfg.theme, g_cfg.color, g_cfg.lang, g_cfg.contrast, g_cfg.anim,
                      g_cfg.fast, g_cfg.peak_hold,
-                     g_cfg.smooth, g_cfg.shift_rpm, g_global_rpm_max,
+                     g_cfg.needle, g_cfg.split_values,
+                     g_cfg.shift_rpm, g_global_rpm_max,
                      g_cfg.units, g_cfg.boost_auto,
                      g_cfg.boost_peak, g_cfg.boost_max,
                      g_global_slot_item[0], g_global_slot_style[0],
@@ -2107,11 +2125,10 @@ static void fmt_1(char *buf, size_t size, float value)
              scaled / 10, scaled % 10);
 }
 
-/* Solo el RPM se predice: es el unico que cambia lo bastante rapido como
- * para que el hueco entre muestras se note. El resto se pinta con la
- * medida tal cual, que es lo que ivan pidio tras verlo en el coche ("solo
- * queda bien en el RPM, los demas parecen artificiales"). */
-static obd_predict g_pred_rpm;
+/* Un filtro de presentacion por PID. Es el unico suavizado del panel:
+ * lo que se guarda, lo que va al log y lo que leen los maximos es la
+ * medida tal cual (ver store_value). */
+static obd_smooth g_ease[256];
 
 /* Cadencia real de cada PID: con cuanto tarda de verdad en volver, no con
  * lo que promete el plan. */
@@ -2123,37 +2140,8 @@ static void disp_reset(void)
     for (int i = 0; i < 256; i++) {
         g_seen_ts[i] = 0;
         g_seen_iv_ms[i] = 0;
+        obd_smooth_reset(&g_ease[i]);
     }
-    obd_predict_reset(&g_pred_rpm);
-}
-
-/* Duracion del tramo de presentacion: el intervalo de muestreo de ese PID,
- * entre 150 ms y 4 s. El RPM se mueve durante todo su segundo; el MAF, si
- * vuelve cada 7 s, recorre el escalon en 4 y espera el resto. */
-static uint32_t disp_span_ms(uint8_t pid)
-{
-    uint32_t sched = 0;
-    for (int i = 0; i < g_sched.count; i++) {
-        if (g_sched.items[i].pid == pid) {
-            sched = g_sched.items[i].period_ms;
-            break;
-        }
-    }
-    /* El mayor de los dos: si un PID vuelve mas despacio de lo prometido, el
-     * tramo tiene que durar lo que tarda de verdad, y si vuelve mas rapido
-     * tampoco puede alargarse por encima del hueco real. */
-    uint32_t real = g_seen_iv_ms[pid];
-    uint32_t p = (real > sched) ? real : sched;
-    if (p == 0u) {
-        return 400u;
-    }
-    if (p < 150u) {
-        p = 150u;
-    }
-    if (p > 4000u) {
-        p = 4000u;
-    }
-    return p;
 }
 
 /* Apunta el intervalo real entre muestras de un PID. Es lo que decide
@@ -2208,13 +2196,6 @@ static uint32_t sample_valid_ms(uint8_t pid)
     return v;
 }
 
-/* Presentacion: SOLO el RPM se predice. En este enlace el RPM vuelve cada
- * 1-2 s, asi que entre muestra y muestra la aguja se quedaba quieta y
- * parecia que iba un segundo por detras del motor. El resto de valores se
- * pintan con la medida tal cual: con datos que cambian despacio, cualquier
- * suavizado se ve artificial. La antiguedad se sigue midiendo con la marca
- * de la muestra, no con esto. */
-
 /* Lectura exacta, sin suavizado: la medida tal cual llego. Es la que va
  * al log y a los maximos, que son registro y no presentacion. */
 static int sample_value_raw(uint8_t pid, uint32_t now, float *out)
@@ -2233,28 +2214,44 @@ static int sample_value_raw(uint8_t pid, uint32_t now, float *out)
     return 1;
 }
 
-/* Lectura para pintar: el valor se mueve hacia la muestra en cada
- * fotograma, asi que la aguja no salta ni se queda quieta entre dos
- * datos (solo el 0x0C, ver obd_predict). La antiguedad y el N/D se miden
- * en sample_value_raw. */
+/* Constante de tiempo de la aguja, en milisegundos. 0 = sin suavizado:
+ * se pinta la medida tal cual llego. */
+static float needle_tau_ms(void)
+{
+    if (g_cfg.needle <= 0) {
+        return 0.0f;
+    }
+    return (g_cfg.needle >= 2) ? 400.0f : 150.0f;
+}
+
+/* Lectura para pintar los numeros y las barras: la medida tal cual, sin
+ * suavizado. El ease (AGUJA) se aplica solo a las agujas del tacometro y
+ * del velocimetro, en draw_screen, porque un numero que se mueve solo
+ * entre dos lecturas es un numero que el coche no ha dicho.
+ *
+ * La antiguedad y el N/D se miden aqui, asi que el ease no puede alargar
+ * la vida de un dato. */
 static int sample_value(uint8_t pid, uint32_t now, float *out)
 {
+    return sample_value_raw(pid, now, out);
+}
+
+/* Lectura para una aguja: la medida, y encima el ease del ajuste AGUJA
+ * (ver obd_ease_apply). No extrapola nada: entre dos muestras la aguja se
+ * acerca a la ultima que llego y ahi se queda, asi que nunca ensena un
+ * valor que el coche no haya dado. Si el dato caduca, el filtro se
+ * reinicia y al volver la aguja arranca en la medida nueva. */
+static int sample_value_needle(uint8_t pid, uint32_t now, float *out)
+{
     if (!sample_value_raw(pid, now, out)) {
+        obd_smooth_reset(&g_ease[pid]);
         return 0;
     }
-    if (!g_cfg.smooth || pid != 0x0C) {
-        /* Sin prediccion: el valor medido, tal cual. */
+    float tau = needle_tau_ms();
+    if (tau <= 0.0f) {
         return 1;
     }
-    const obd_sample *sample = obd_store_get(&g_store, pid);
-    if (sample == NULL) {
-        return 1;
-    }
-    /* 1200 rpm de adelanto como mucho (unos 1100 rpm/s a esta cadencia), y
-     * solo durante un intervalo de muestreo: si la muestra se retrasa, la
-     * aguja se queda donde llego en vez de seguir subiendo sola. */
-    *out = obd_predict_step(&g_pred_rpm, sample->value, sample->ts_ms, now,
-                            disp_span_ms(pid), 1200.0f, 25.0f);
+    *out = obd_ease_apply(&g_ease[pid], *out, now, tau);
     return 1;
 }
 
@@ -3385,20 +3382,10 @@ static void store_value(uint8_t pid, const elm_frame *frame, uint32_t ts)
         return;
     }
 
+    /* Lo que se guarda es la medida tal cual llego: el log, los maximos
+     * y el historico son registro, no presentacion. El unico suavizado es
+     * el de las agujas, en sample_value_needle(). */
     float v = value.value;
-
-    /* Suavizado EMA opcional (constante de tiempo fija). */
-    if (g_cfg.smooth) {
-        if (pid == 0x0C) {
-            v = obd_smooth_apply(&g_ema_rpm, v, ts);
-        } else if (pid == 0x0B) {
-            v = obd_smooth_apply(&g_ema_map, v, ts);
-        } else if (pid == 0x0D) {
-            v = obd_smooth_apply(&g_ema_speed, v, ts);
-        } else if (pid == g_thr_pid) {
-            v = obd_smooth_apply(&g_ema_thr, v, ts);
-        }
-    }
 
     obd_store_set(&g_store, pid, v, value.unit, ts, OBD_SRC_REAL);
 
@@ -3415,7 +3402,7 @@ static void maybe_capture_key_on(uint32_t now, uint32_t session_ms)
     float rpm_value = 0.0f;
     float speed_value = 0.0f;
 
-    if (!sample_value(0x0B, now, &map_value) ||
+    if (!sample_value_raw(0x0B, now, &map_value) ||
         !sample_value_raw(0x0C, now, &rpm_value)) {
         return;
     }
@@ -3567,8 +3554,45 @@ static uint8_t widget_pid(int item)
     case W_O2_2:     return 0x15;
     case W_DIST_MIL: return 0x21;
     case W_BARO:     return 0x33;
-    case W_GEAR:     return 0;   /* derivado de RPM y velocidad */
+    /* Derivados: no tienen PID propio, pero el cuadro no puede quedar a
+     * cero sin el dato del que salen. La marcha se calcula con RPM y
+     * velocidad; el turbo, con el MAP (un motor sin MAP no tiene boost). */
+    case W_GEAR:     return 0x0D;
+    case W_BOOST:    return g_map_supported ? 0x0B : 0;
     default:         return 0;
+    }
+}
+
+/* Importancia de un valor en el reparto del enlace. El RPM va aparte; de
+ * los demas, primero lo que se mira de reojo mientras se conduce
+ * (velocidad y carga), despues lo que se lee de un vistazo (avance y
+ * mariposa) y al final las temperaturas, que cambian despacio. */
+#define VALUE_PRIO_COUNT 6
+
+static int pid_priority(uint8_t pid)
+{
+    switch (pid) {
+    case 0x0D:              /* velocidad */
+        return 1;
+    case 0x0B:              /* MAP */
+    case 0x10:              /* MAF */
+    case 0x04:              /* carga calculada */
+    case 0x43:              /* carga absoluta */
+        return 2;
+    case 0x0E:              /* avance */
+        return 3;
+    case 0x11:              /* mariposa */
+    case 0x49:              /* pedal */
+    case 0x4A:              /* pedal, alternativo */
+    case 0x5A:              /* pedal, relativo */
+        return 4;
+    case 0x05:              /* refrigerante */
+    case 0x0F:              /* aire de admision */
+    case 0x5C:              /* aceite */
+    case 0x46:              /* ambiente */
+        return 5;
+    default:
+        return 6;
     }
 }
 
@@ -3624,45 +3648,54 @@ static void apply_screen_schedule(uint32_t now)
      * reparte por capacidad; si cabe, obd_plan_period devuelve la tabla tal
      * cual y el coche rapido no cambia de comportamiento. */
     obd_plan_init(&g_link_plan, link_capacity(), g_link_service_ms,
-                  obd_profile_demand(mode_mask));
+                  obd_profile_demand(mode_mask), g_cfg.split_values);
     obd_sched_set_strict(&g_sched, g_link_plan.compressed);
 
-    /* Cuantos valores se reparten el presupuesto: el RPM va aparte y los
-     * que no estan soportados no cuentan. */
+    /* Que valores entran en el reparto. En las pantallas con huecos
+     * configurables (GENERAL y TELEMETRIA) solo cuenta lo que se PINTA; en
+     * las demas, lo que el perfil marca como visible para esa pantalla.
+     * Antes contaba todo lo visible por mascara aunque no estuviera en
+     * pantalla: en phase1_010 eran trece PID pidiendo turno, y el RPM se
+     * quedaba con las sobras. */
+    int by_slot = (g_mode == MODE_QV || g_mode == MODE_TELEMETRY);
     int value_count = 0;
     for (int i = 0; i < g_sched.count; i++) {
         uint8_t pid = g_sched.items[i].pid;
-        uint8_t mask = obd_profile_visible_mask(pid);
-        int visible = (mask & mode_mask) != 0 ||
-                      obd_forced_set_has(&forced, pid);
-        if (visible && pid != 0x0C && g_sched.items[i].supported != 2) {
+        int on_screen = by_slot
+                            ? obd_forced_set_has(&forced, pid)
+                            : (obd_profile_visible_mask(pid) & mode_mask) != 0;
+        if (on_screen && pid != 0x0C && g_sched.items[i].supported != 2) {
             value_count++;
         }
     }
 
-    /* Rango de reparto, primero lo que se PINTA y despues lo visible por
-     * mascara del perfil. Antes el rango salia solo de la mascara, asi que
-     * el avance (0x0E) y la mariposa (0x11) — que el perfil marca como
-     * DIAG — caian al fondo; con el plan comprimido del K-line les tocaba
-     * el periodo de fondo, 60 s, y en pantalla salian N/D justo despues de
-     * ponerlos en el GENERAL y en el TELEM. Los no soportados no cogen
-     * rango. */
+    /* Rango de reparto. Antes salia del orden de la tabla y el avance
+     * (0x0E) y la mariposa (0x11) — que el perfil marca como DIAG — caian
+     * al fondo: con el plan comprimido del K-line les tocaba el periodo de
+     * fondo, 60 s, y en pantalla salian N/D. Ahora manda la importancia del
+     * dato: velocidad, carga, avance, mariposa, temperaturas y el resto.
+     * Los no soportados no cogen rango. */
+    /* Manda la importancia del dato, no el orden de la tabla: con REPARTO
+     * por debajo de lo que se pinta, el que paga es el menos importante
+     * (una temperatura), no el avance por haber caido tarde en la lista. */
     int rank_of[OBD_SCHED_MAX];
     memset(rank_of, 0, sizeof(rank_of));
     {
         int rank = 0;
-        for (int pass = 0; pass < 2; pass++) {
+        for (int prio = 1; prio <= VALUE_PRIO_COUNT; prio++) {
             for (int i = 0; i < g_sched.count && i < OBD_SCHED_MAX; i++) {
                 uint8_t pid = g_sched.items[i].pid;
                 if (pid == 0x0C || g_sched.items[i].supported == 2) {
                     continue;
                 }
-                int drawn = obd_forced_set_has(&forced, pid);
-                if ((pass == 0) != (drawn != 0)) {
+                if (pid_priority(pid) != prio) {
                     continue;
                 }
-                if (!drawn &&
-                    (obd_profile_visible_mask(pid) & mode_mask) == 0) {
+                int on_screen = by_slot
+                                    ? obd_forced_set_has(&forced, pid)
+                                    : (obd_profile_visible_mask(pid) &
+                                       mode_mask) != 0;
+                if (!on_screen) {
                     continue;
                 }
                 rank_of[i] = ++rank;
@@ -3672,9 +3705,9 @@ static void apply_screen_schedule(uint32_t now)
 
     for (int i = 0; i < g_sched.count; i++) {
         uint8_t pid = g_sched.items[i].pid;
-        uint8_t mask = obd_profile_visible_mask(pid);
-        int visible = (mask & mode_mask) != 0 ||
-                      obd_forced_set_has(&forced, pid);
+        int visible = by_slot
+                          ? obd_forced_set_has(&forced, pid)
+                          : (obd_profile_visible_mask(pid) & mode_mask) != 0;
         int my_rank = rank_of[i];
         uint16_t period = obd_plan_period(&g_link_plan, pid, visible,
                                           my_rank, value_count);
@@ -4876,7 +4909,7 @@ static void run_scan(int sock)
 typedef struct {
     char rpm[16];
     int rpm_valid;
-    float rpm_val;   /* con prediccion: posicion de la aguja */
+    float rpm_val;   /* suavizado para la aguja (ver sample_value_needle) */
     float rpm_raw;   /* medida exacta: avisos y umbrales */
 
     char speed[16];
@@ -5073,8 +5106,8 @@ static void history_update(uint32_t now)
                 ok = 1;
             }
         } else if (i == W_THR) {
-            /* La grafica y los maximos son registro: medida cruda, nunca la
-             * prediccion de la aguja. */
+            /* La grafica y los maximos son registro: medida cruda, nunca el
+             * valor suavizado de la aguja. */
             ok = sample_value_raw(g_thr_pid, now, &v);
         } else {
             ok = sample_value_raw(g_hist_pid[i], now, &v);
@@ -7264,12 +7297,12 @@ static void draw_settings_overlay(void)
     const float w = 464.0f;
     const float h = 238.0f;
     const int items = SET_COUNT;
-    /* Diez filas por columna, no nueve: con nueve, SALIR (la fila 18) caia
-     * en una tercera columna que empieza en x=472 sobre una pantalla de 480
-     * y un panel que acaba justo ahi, asi que existia en la lista y no se
-     * veia nunca. Se llega a ella con ARRIBA desde la primera fila o
-     * bajando, y ahora esta a la vista. */
-    const int per_col = 10;
+    /* Once filas por columna, no diez: con veintiuna filas, el paso de 16
+     * px las mete todas en dos columnas y SALIR sigue a la vista (con diez
+     * por columna caia en una tercera columna que empieza en x=472 sobre
+     * una pantalla de 480, existia en la lista y no se veia nunca). */
+    const int per_col = 11;
+    const float pitch = 16.0f;
     const float colw = 218.0f;
 
     /* Sombra y panel. */
@@ -7285,12 +7318,12 @@ static void draw_settings_overlay(void)
         int col = i / per_col;
         int row = i % per_col;
         float cx = x + 12.0f + (float)col * (colw + 8.0f);
-        float ry = y + 42.0f + (float)row * 18.0f;
+        float ry = y + 42.0f + (float)row * pitch;
         int selected = (g_settings_sel == i);
 
         if (selected) {
-            gfx_rect(cx - 2.0f, ry - 4.0f, colw, 17.0f, QV_PANEL);
-            gfx_rect(cx - 2.0f, ry - 4.0f, 3.0f, 17.0f, QV_RED);
+            gfx_rect(cx - 2.0f, ry - 4.0f, colw, 15.0f, QV_PANEL);
+            gfx_rect(cx - 2.0f, ry - 4.0f, 3.0f, 15.0f, QV_RED);
         }
 
         const char *label = "";
@@ -7374,6 +7407,23 @@ static void draw_settings_overlay(void)
             label = tr("LOG COMPLETO");
             snprintf(value, sizeof(value), "%s",
                      g_cfg.log_full ? "SI" : "NO");
+        } else if (i == SET_NEEDLE) {
+            label = tr("AGUJA");
+            snprintf(value, sizeof(value), "%s",
+                     g_cfg.needle <= 0 ? tr("DIRECTA")
+                                       : (g_cfg.needle >= 2 ? tr("MUY SUAVE")
+                                                            : tr("SUAVE")));
+        } else if (i == SET_SPLIT) {
+            label = tr("REPARTO");
+            if (g_cfg.split_values <= 0) {
+                /* No es "solo RPM": los cuadros siguen vivos, solo que
+                 * fuera del cupo rapido. */
+                snprintf(value, sizeof(value), "%s", tr("SIN CUPO"));
+            } else {
+                snprintf(value, sizeof(value), "%d %s", g_cfg.split_values,
+                         g_cfg.split_values == 1 ? tr("VALOR")
+                                                 : tr("VALORES"));
+            }
         } else {
             label = tr("SALIR");
             snprintf(value, sizeof(value), "CERRAR APP");
@@ -9243,12 +9293,16 @@ static void draw_screen(uint32_t now, int requests, int data_count,
     float value;
 
     if (sample_value(0x0C, now, &value)) {
-        float raw = 0.0f;
         d.rpm_valid = 1;
-        d.rpm_val = value;                    /* aguja: puede ir adelantada */
-        d.rpm_raw = sample_value_raw(0x0C, now, &raw) ? raw : value;
-        /* El numero es siempre la medida, nunca la prediccion. */
-        fmt_0(d.rpm, sizeof(d.rpm), d.rpm_raw);
+        d.rpm_raw = value;
+        /* El numero es siempre la medida; la aguja, con el ease de AGUJA. */
+        fmt_0(d.rpm, sizeof(d.rpm), value);
+        float needle = value;
+        if (sample_value_needle(0x0C, now, &needle)) {
+            d.rpm_val = needle;
+        } else {
+            d.rpm_val = value;
+        }
     }
     if (sample_value(0x0B, now, &value)) {
         if (units_imperial()) {
@@ -9276,11 +9330,16 @@ static void draw_screen(uint32_t now, int requests, int data_count,
         d.iat_val = value;
     }
     if (sample_value(0x0D, now, &value)) {
-        float sraw = 0.0f;
         fmt_0(d.speed, sizeof(d.speed), units_speed_from_kmh(value));
         d.speed_valid = 1;
-        d.speed_val = units_speed_from_kmh(value);
-        d.speed_raw = sample_value_raw(0x0D, now, &sraw) ? sraw : value;
+        d.speed_raw = value;
+        /* La aguja del velocimetro se suaviza igual que la del tacometro. */
+        float needle = value;
+        if (sample_value_needle(0x0D, now, &needle)) {
+            d.speed_val = units_speed_from_kmh(needle);
+        } else {
+            d.speed_val = units_speed_from_kmh(value);
+        }
     }
     if (sample_value(g_thr_pid, now, &value)) {
         fmt_0(d.thr, sizeof(d.thr), value);
@@ -9810,6 +9869,26 @@ static int handle_settings_input(unsigned int pressed)
             g_cfg.debug = !g_cfg.debug;
         } else if (g_settings_sel == 17) {
             g_cfg.log_full = !g_cfg.log_full;
+        } else if (g_settings_sel == SET_NEEDLE) {
+            /* 0 = la medida tal cual, 1 = suave (150 ms), 2 = muy suave
+             * (400 ms). Cambiar esto solo afecta a lo que se pinta. */
+            g_cfg.needle += dir;
+            if (g_cfg.needle < 0) g_cfg.needle = 0;
+            if (g_cfg.needle > 2) g_cfg.needle = 2;
+            disp_reset();
+            log_file_printf("AJUSTE: aguja = %d (tau %d ms)\n",
+                            g_cfg.needle, (int)needle_tau_ms());
+            log_sync();
+        } else if (g_settings_sel == SET_SPLIT) {
+            /* Cuantos valores rapidos entran en el reparto del enlace. Con
+             * 0 el RPM se queda todo el presupuesto; el resto de cuadros
+             * siguen vivos pero mas lentos. */
+            g_cfg.split_values += dir;
+            if (g_cfg.split_values < 0) g_cfg.split_values = 0;
+            if (g_cfg.split_values > 4) g_cfg.split_values = 4;
+            log_file_printf("AJUSTE: reparto = %d valores\n",
+                            g_cfg.split_values);
+            log_sync();
         }
 
         settings_apply();

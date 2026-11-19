@@ -4,19 +4,17 @@
 #include <stdint.h>
 
 /* ------------------------------------------------------------------ */
-/* Suavizado exponencial con constante de tiempo fija.                */
+/* Presentation ease: one time constant, whatever the frame rate.      */
 /* ------------------------------------------------------------------ */
 
-/* Constante de tiempo del filtro, en milisegundos.
+/* This is the only smoothing left. It works on what is drawn, not on
+ * what is stored: the store, the log, the peaks and the history ring all
+ * see the measurement exactly as it arrived.
  *
- * Es el retardo que introduce: el filtro alcanza el 63% del valor real
- * pasado un tau, sea cual sea la cadencia de muestreo.
- *
- * Con un factor de mezcla fijo (0,3) el retardo dependia de la
- * cadencia: 2,8 muestras hasta el 63%, es decir 2,1 s cuando el RPM
- * solo se refrescaba a 1,3 Hz. Ese era el retardo que se notaba en el
- * tacometro cuando se aceleraba. */
-#define OBD_SMOOTH_TAU_MS 150.0f
+ * Why a time constant and not a fixed mix factor: with a fixed factor
+ * the lag is "0.3 of a sample", which at the 1.3 Hz of a K-line rpm is
+ * more than a second. With tau fixed, the lag is the same at 60 fps, at
+ * 30 fps and with a stalled frame. */
 
 typedef struct {
     float value;
@@ -24,46 +22,25 @@ typedef struct {
     int initialized;
 } obd_smooth;
 
-/* Factor de mezcla para un intervalo dt entre dos muestras:
- * alpha = 1 - exp(-dt/tau). */
-float obd_smooth_alpha(uint32_t dt_ms);
+/* Mix factor for a frame lasting dt_ms with time constant tau_ms:
+ * alpha = 1 - exp(-dt/tau).
+ *
+ *   - tau_ms <= 0 means no filtering at all: the value is taken as is.
+ *   - dt_ms == 0 moves nothing, so drawing the same gauge twice in one
+ *     millisecond does not make it jump to the target. */
+float obd_ease_alpha(uint32_t dt_ms, float tau_ms);
 
-/* Reinicia el filtro: la siguiente muestra se toma tal cual. */
+/* Reset the filter: the next value is taken as it is. */
 void obd_smooth_reset(obd_smooth *s);
 
-/* Aplica el filtro a una muestra y devuelve el valor suavizado. */
-float obd_smooth_apply(obd_smooth *s, float v, uint32_t ts);
-
-/* ------------------------------------------------------------------ */
-/* Prediccion de presentacion.                                        */
-/* ------------------------------------------------------------------ */
-
-/* La aguja no interpola hacia atras: se adelanta. Con la ultima medida y
- * la velocidad que traia, el valor pintado sigue la misma direccion hasta
- * que llega la muestra siguiente, y en ese instante vuelve a ser
- * exactamente el valor medido. Es lo que hace que un tacometro muestreado
- * a 1 Hz no parezca con un segundo de retraso al acelerar.
+/* Move the drawn value toward `target` for a frame that ends at `now`.
  *
- * Reglas:
- *   - En el instante de la muestra devuelve el valor medido, sin tocar.
- *   - Entre muestras extrapola con la velocidad estimada, con tope de
- *     `max_step` unidades y solo durante `span_ms`; despues se queda
- *     quieto en la ultima medida (no se inventa una rampa infinita).
- *   - Si el cambio entre muestras es menor que `deadband`, la velocidad se
- *     toma como cero: el ruido de un ralenti no mueve la aguja.
- *   - Con una sola muestra no hay velocidad y no se extrapola nada.
- */
-typedef struct {
-    float last;          /* ultima medida */
-    float vel;           /* unidades por segundo */
-    uint32_t last_ts;
-    int samples;
-} obd_predict;
-
-void obd_predict_reset(obd_predict *p);
-
-float obd_predict_step(obd_predict *p, float value, uint32_t sample_ts,
-                       uint32_t now, uint32_t span_ms, float max_step,
-                       float deadband);
+ * The first call after a reset takes the target as it is, so a gauge
+ * never glides up from zero when a value appears. The filter is driven
+ * by the frame clock, not by the sample clock: the needle keeps moving
+ * toward the last measurement between two samples, and the moment a new
+ * one arrives the target changes and the movement continues from where
+ * the needle was. */
+float obd_ease_apply(obd_smooth *s, float target, uint32_t now, float tau_ms);
 
 #endif

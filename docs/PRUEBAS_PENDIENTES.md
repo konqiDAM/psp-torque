@@ -84,6 +84,60 @@ goes in.
 **Done when:** same PIDs as before, `BOOST` with the right sign, no `STOPPED`, and the
 per-screen bandwidth split working.
 
+### T16 — AGUJA: direct, soft, very soft
+
+**What we want to know:** which ease he actually likes on the MX-5 needle, or whether
+none of them does it.
+
+**How:** `AJUSTES -> AGUJA`, one value per minute at idle, then three short blips of
+throttle in each. `AJUSTES -> LOG COMPLETO` stays on, so the log holds every frame of
+`010C` that arrived.
+
+**What to look for:** the needle at the blip (does it lag, overshoot or stutter?) and,
+in the log, the gap between `> 010C` lines. The ease can only approach the last sample;
+if the gap is 1 s the needle cannot do more than that, and no setting fixes it — that is
+REPARTO's job.
+
+**Done when:** he picks one of the three and says why, or the answer is that the needle
+still trails and the fix has to be more rpm polling.
+
+### T17 — REPARTO: how many values share the link
+
+**What we want to know:** how much faster the rpm gets when the other tiles are slowed
+down, and whether the slowed tiles still read.
+
+**How:** `AJUSTES -> REPARTO` at 0, then 2, then 3, one minute each, same screen
+(GENERAL), same conditions. The plan's arithmetic for this link and the four value PIDs
+the factory GENERAL draws says the rpm gets a sample every 583 ms at 0, 656 ms at 2 and
+702 ms at 3; tiles inside the quota come back every 5.0 s and the ones outside it every
+10.4 s. **Nothing is measured yet**: only this log settles it.
+
+**What to look for:** `grep -c '^> 010C'` against the session length (what it really got,
+not what the plan asked for), and whether the tiles outside the cut (usually intake air
+and coolant) blank to `N/D`. They should not: they are asked every ~10 s and the
+validity window tracks the real interval.
+
+**Done when:** a log shows which REPARTO gives the best needle with the tiles alive, and
+that number becomes the default.
+
+### T18 — The `-1` on the advance tile
+
+**Why:** he saw the advance move to values like -1 in the `fase2.61`/`fase2.62` drive.
+The log for that session is not here, and the two logs that are (`phase1_010`, fase2.60)
+show `010E` answering `0x94`-`0xD0`, which is 10-40 degrees, and no `0x7E` (the only raw
+byte that decodes to exactly -1.0). Nothing in the code produces -1 for that PID outside
+a `0x7E` reply, so the cause is still unknown.
+
+**How:** next session with full logging on, and a note of the screen, the tile label and
+roughly when. `grep -A1 '^> 010E'` in that log shows every reply the tile could have
+painted.
+
+**Done when:** either a `0x7E` reply appears (a real ECU answer, and the tile was right),
+or the tile is shown to have painted something the log never carried, which is a bug in
+the display path and has to be found. `fase2.63` narrows it: nothing is extrapolated any
+more and only the two needles are eased, so every number on screen is a decoded frame
+(the advance was already drawn raw before, so this removes no known cause).
+
 ### T11 — Abrupt exit
 
 **How:** launch the app, leave it 30 s, then hold the PSP power switch up to kill it

@@ -390,10 +390,26 @@ del log que lo demuestra.
   durante el intervalo de muestreo de ese PID (150 ms - 4 s). La primera version
   usaba un filtro exponencial con tau = periodo/3 y no servia: cubria el 95 % en el
   primer tercio y se quedaba parada el resto, que es lo que se veia como "no es
-  progresivo". El log de estado lee la medida cruda.
+  progresivo". Sustituida por la prediccion de `fase2.61` y, al verla en el coche,
+  por el ease de P11. El log de estado lee la medida cruda.
 - [x] **P10 - Caducidad por cadencia real.** `fase2.56`. Una muestra vale tres veces
   el intervalo **real** de su PID (media movil del hueco medido), no el que promete
   el plan, con suelo de 6 s y techo de 30. Cierra los ultimos `N/D` intermitentes.
+- [x] **P11 - La aguja se mueve, no adivina.** `fase2.63`. La prediccion que salio
+  en `fase2.61`/`fase2.62` se va: en el coche adelantaba peor que la rampa. (El
+  avance que mostraba valores imposibles no lo causaba la prediccion: 0x0E nunca
+  paso por ella, y el log de esa sesion no esta; queda como T18.) En su lugar las agujas del tacometro y del velocimetro
+  se acercan a la ultima medida en cada fotograma, con `tau` elegible (`AGUJA`:
+  directa / 150 ms / 400 ms), y nunca extrapolan; los numeros, las barras y la grafica
+  siguen siendo la medida tal cual. El almacen deja de filtrar al guardar, asi que el
+  log, los maximos y la grafica son evidencia.
+  `REPARTO` (0-4) decide cuantos valores de pantalla entran en el reparto rapido del
+  enlace; el cupo se reparte por importancia (velocidad, carga, avance, mariposa,
+  temperaturas), solo cuenta lo que se pinta, y el reparto pide el presupuesto exacto
+  (un test lo fija). El techo de la clase K-line sube a 2,5 req/s, que es lo que la
+  MX-5 ya entrego en `phase1_010`. Con el presupuesto de la MX-5 y cinco valores
+  pintados el plan pide una muestra de RPM cada 615-816 ms segun `REPARTO`; la cifra
+  medida queda pendiente de T17.
 
 Criterio: el coche se identifica solo, una sesion completa sin `NO DATA`, los
 indicadores se mueven y no parpadean a `N/D`, y salir deja el resumen en el log.

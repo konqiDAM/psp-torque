@@ -170,9 +170,17 @@ salir. Si se quedó en una herramienta, abre GENERAL.
 
 ### Ajustes
 
-`START` abre el menú: `TEMA`, `IDIOMA` (auto/español/inglés), `CONTRASTE`,
-`ANIMACION`, `MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`, `RPM MAX`,
-`UNIDADES` (métrico/imperial), `TURBO AUTO`, `BOOST MAX`, `FPS` y `SALIR`.
+`START` abre el menú: `TEMA`, `COLOR`, `IDIOMA` (auto/español/inglés),
+`CONTRASTE`, `ANIMACION`, `MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`,
+`RPM MAX`, `UNIDADES` (métrico/imperial), `TURBO AUTO`, `BOOST MAX`, `HUECO ELM`,
+`PANTALLA INICIAL`, `DEBUG`, `LOG COMPLETO`, `AGUJA`, `REPARTO` y `SALIR`.
+
+`AGUJA` elige cuánto se suavizan las agujas del tacómetro y del velocímetro
+(`DIRECTA`, `SUAVE` de 150 ms o `MUY SUAVE` de 400 ms); los números y las barras
+van siempre con la medida tal cual. `REPARTO` (0 a 4) decide cuántos valores de
+la pantalla entran en el reparto rápido del enlace: más bajo, aguja más rápida.
+En un coche de CAN el reparto no se usa (la tabla base cabe entera), así que
+`REPARTO` no cambia nada en el MiTo.
 
 Se guardan en `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` y se aplican al
 instante.
@@ -321,18 +329,21 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
   del enlace entre lo que pide la pantalla activa y lo que no, y se recalcula
   al cambiar de pantalla o de capacidad. El segundo mide lo que el adaptador
   entrega de verdad y sube o baja ese presupuesto cada 10 s. En CAN se planifica
-  a 16,5 peticiones/s; en el K-line de la MX-5, a 2,2 (383 ms por petición son
+  a 16,5 peticiones/s; en el K-line de la MX-5, a 2,5 (383 ms por petición son
   2,6 físicos). Un test del núcleo calcula la demanda y falla si se pasa.
-- **Aguja del tacómetro con predicción:** entre dos muestras la aguja sigue en
-  la dirección que traía, así que no va un segundo por detrás del motor, y en el
-  instante en que llega la medida vuelve a ser exactamente esa medida. El
-  adelanto está topado (1200 rpm), solo dura un intervalo y se queda donde llega
-  si la muestra se retrasa; por debajo de 25 rpm de cambio no se adelanta nada,
-  para que el ralenti no mueva la aguja. El número del tacómetro, el pico de la
-  sesión y los avisos de cambio y de zona roja son siempre la medida, nunca la
-  predicción. Los demás indicadores se pintan con la medida tal cual.
-- **Filtro de 150 ms sobre la muestra:** quita el ruido del propio dato en el
-  momento de guardarlo.
+- **Aguja suavizada, sin inventar:** las agujas del tacómetro y del velocímetro
+  se acercan a la última medida en cada fotograma y ahí se quedan: nunca
+  extrapolan por delante de la última lectura ni se inventan un valor. Los
+  números, las barras y la gráfica van siempre con la medida tal cual.
+  `AGUJA` en el menú elige `DIRECTA`, `SUAVE` (150 ms) o `MUY SUAVE` (400 ms).
+- **Reparto del enlace (`REPARTO`):** cuántos valores de pantalla entran en el
+  reparto rápido, de 0 a 4. Cada valor visible reserva su suelo y el RPM se lleva
+  el resto, así que con `REPARTO` bajo la aguja va más rápida; los valores que se
+  pintan y no entran en el cupo vuelven cada ~10 s en vez de apagarse a `N/D`.
+  Solo cuenta lo que está en pantalla, no todo lo que el perfil marca.
+- **El almacén guarda la medida tal cual llega:** el log, los máximos y el
+  histórico de la gráfica son evidencia, no presentación. El suavizado vive solo
+  en lo que se pinta.
 - **Cadencia por VBlank:** el dibujo se sincroniza con `sceDisplayGetVcount()`
   en lugar de con temporizadores, y el número de VBlanks por fotograma se
   ajusta solo según la carga de CPU.

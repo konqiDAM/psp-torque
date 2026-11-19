@@ -225,46 +225,97 @@ Un filtro exponencial con factor de mezcla fijo tiene un retardo que depende
 de la cadencia de muestreo: con factor 0,3 y RPM a 1,3 Hz, el indicador
 tardaba **2,1 s** en llegar al 63% del valor real. Ese era el retardo visible.
 
-El filtro del núcleo (`obd_smooth`) usa constante de tiempo fija
-(`tau = 150 ms`): `alpha = 1 - exp(-dt/tau)`. El retardo es siempre `tau`,
-venga la cadencia como venga.
+El filtro del núcleo (`obd_ease_apply`) usa constante de tiempo fija
+(`alpha = 1 - exp(-dt/tau)`): el retardo es siempre `tau`, venga la cadencia
+como venga. **El filtro ya no se aplica al guardar la muestra** (fase2.63): se
+aplica al pintar, y solo al pintar (5.5b).
 
-### 5.5b Predicción de la aguja del tacómetro (fase2.55 a fase2.61)
+### 5.5b AGUJA y REPARTO: lo que se mueve y lo que se pide (fase2.63)
 
-El filtro de 5.5 se aplica **al guardar la muestra**, así que entre dos muestras
-el valor está quieto. En CAN no se nota (un PID vuelve cada 330 ms), pero en el
-K-line de la MX-5 el RPM vuelve cada 1,1 s y la aguja daba un salto y se quedaba
-parada: eso es lo que parece "lento" aunque el dato sea correcto.
+La predicción de `fase2.61`-`fase2.62` ya no existe. El dueño la vio en el
+coche: adelantaba peor que la rampa, porque con el RPM volviendo cada ~1,1 s
+cualquier velocidad estimada con dos muestras o se queda corta o se pasa, y al
+llegar la medida real la aguja saltaba. Lo que quedó es más simple de explicar
+y de comprobar: **la aguja se acerca a la última medida, y ahí se queda.** No
+hay nada en pantalla que el coche no haya dicho: el ease solo mueve las dos
+agujas (tacómetro y velocímetro), y todo lo demás — números, barras, gráfica,
+máximos, marcha, avisos — se pinta con la medida tal cual.
 
-Tres intentos, y el bueno es el último:
+**AGUJA** (ajuste del menú, `aguja=` en `settings.txt`):
 
-1. **Filtro exponencial** con `tau = periodo/3`: cubría el 95 % del escalón en el
-   primer tercio del intervalo y se quedaba parado el resto. En el coche se ve
-   como "se mueve de golpe y luego nada".
-2. **Rampa lineal** durante todo el intervalo: se movía siempre, pero metía un
-   intervalo entero de retraso — 1,1 s en el RPM, que se nota como que la aguja
-   va por detrás del motor.
-3. **Predicción** (`obd_predict` en `src/core/smooth.c`), y **solo para el RPM**:
-   con la última medida y la velocidad que traía, el valor pintado sigue en la
-   misma dirección hasta que llega la muestra siguiente, y en ese instante vuelve
-   a ser exactamente el valor medido. Tope de 1200 rpm de adelanto, solo durante
-   un intervalo (si la muestra se retrasa, la aguja **se queda donde llegó**, no
-   vuelve atrás), y banda
-   muerta de 25 rpm para que el ralenti no mueva la aguja.
+| valor | qué hace | `tau` |
+|---|---|---|
+| 0 DIRECTA | se pinta la medida tal cual llega | — |
+| 1 SUAVE (por defecto) | ease hasta la medida, cuadro a cuadro | 150 ms |
+| 2 MUY SUAVE | lo mismo, más lento | 400 ms |
 
-El resto de indicadores se pintan con la medida tal cual: con datos que cambian
-despacio, cualquier suavizado se ve artificial (fue la conclusión de verlo en el
-coche).
+El ease corre en `sample_value_needle()` con un `obd_smooth` por PID y se mueve
+con el reloj del fotograma, no con el de las muestras: la aguja no se queda
+quieta entre dos muestras ni salta al llegar la siguiente. Dos llamadas en el
+mismo milisegundo no mueven nada (`alpha = 0`), que es la red por si alguien
+lee la misma aguja dos veces en un fotograma; hoy la lee una sola vez.
 
-- La antigüedad y el `N/D` se miden con la marca de la muestra, no con esto, y
-  caducan a los tres intervalos del PID tomando el **mayor** entre el intervalo
-  real medido (media móvil del hueco entre muestras) y el que promete el plan,
-  con suelo de 6 s y techo de 30.
-- `sample_value_raw()` es la lectura exacta, y es la que usan el log de estado, el
-  número del tacómetro, el indicador de marcha, los avisos de cambio y rojo, el
-  aprendizaje del turbo y el historial de la gráfica: la evidencia y los máximos
-  no pueden ser la animación.
-- Se reinicia al conectar y al cambiar el ajuste.
+**REPARTO** (ajuste del menú, `reparto=`): cuántos valores de pantalla entran
+en el reparto rápido del enlace, de 0 a 4. Cada valor visible reserva su suelo
+(0,2 Hz dentro del cupo, 0,1 Hz fuera) y el RPM se lleva el resto. Tabla del
+plan con el presupuesto de la MX-5 (2,125 req/s tras el 85 % de 2,5 y 383 ms por
+petición) y cinco valores pintados en el GENERAL — **aritmética, no medida**:
+
+| REPARTO | RPM: periodo | RPM: una muestra cada | cupo | resto |
+|---|---|---|---|---|
+| 0 | 200 ms (suelo de la tabla) | 583 ms | — | 10,4 s |
+| 1 | 232 ms | 615 ms | 5,0 s | 10,4 s |
+| 2 | 273 ms | 656 ms | 5,0 s | 10,4 s |
+| 3 (por defecto) | 319 ms | 702 ms | 5,0 s | 10,4 s |
+| 4 | 372 ms | 755 ms | 5,0 s | 5,0 s |
+
+(La tabla es del GENERAL de fábrica de la MX-5, que pinta cuatro valores con
+PID propio: velocidad, MAF, aire de admisión y avance; la marcha es derivada y
+no pide nada. Una vista guardada con cinco huecos con PID sube un paso: 615 /
+656 / 702 / 755 / 816 ms.)
+
+Reglas que acompañan al reparto:
+
+- **El reparto pide el presupuesto exacto en el rango normal**: RPM + cupo +
+  resto suman `budget`. Es la condición que fija
+  `test_plan_never_oversubscribes()`, barriendo capacidades de 1,2 a 2,5 req/s y
+  de 1 a 10 valores, y la que faltaba cuando los valores lentos se pagaban
+  aparte (llegó a pedir 1,7 veces el presupuesto en el DIAG). La excepción está
+  en el suelo de capacidad (≤ 1,2 req/s): el RPM se queda el presupuesto entero
+  y cada valor visible cae al suelo absoluto de 10 s o al tope de 60 s, así que
+  la suma se pasa como mucho `n × 1/60` — a propósito, porque el planificador
+  sirve al RPM primero y un cuadro en `N/D` no le sirve a nadie.
+- Solo cuentan los valores que **se pintan**, no todo lo que el perfil marca
+  como visible: en `phase1_010` entraban trece PID en el reparto y el RPM se
+  quedaba con las sobras. En las pantallas con huecos configurables (GENERAL y
+  TELEMETRÍA) manda lo que hay en los huecos; en las demás, la máscara del
+  perfil para esa pantalla.
+- El cupo se reparte **por importancia**, no por orden de la tabla: velocidad,
+  carga (MAP/MAF), avance, mariposa, temperaturas y el resto (`pid_priority()`
+  en `main.c`). Con REPARTO 3 en el GENERAL el que se queda lento es el aire de
+  admisión, no el avance.
+- Un valor visible sin presupuesto no cae al periodo de fondo: se queda en
+  10 s (`PROFILE_PLAN_VALUE_SLOW_MS`), dentro de la ventana de caducidad de
+  30 s. Fuera de pantalla sí, una petición por minuto.
+- El techo de la clase K-line sube de 2,2 a 2,5 req/s
+  (`PROFILE_LINK_CLASS_KLINE`): la MX-5 ya entregó 2,50 sostenidos en
+  `phase1_010` (`Enlace: 2.50 req/s entregadas`) y el techo físico con 383 ms es
+  2,61. Sigue siendo una estimación: la capacidad real la mueve
+  `obd_capacity_next` con lo medido.
+
+Lo que no cambió:
+
+- La antigüedad y el `N/D` se miden con la marca de la muestra, y caducan a los
+  tres intervalos del PID tomando el **mayor** entre el intervalo real medido
+  (media móvil del hueco entre muestras) y el que promete el plan, con suelo de
+  6 s y techo de 30. El ease no alarga la vida de un dato: si caduca, su filtro
+  se reinicia y al volver la aguja arranca en la medida nueva.
+- `sample_value_raw()` es la lectura exacta, y es la que usan el log de estado,
+  el número del tacómetro, todos los números y barras del cuadro, el indicador
+  de marcha, los avisos de cambio y rojo, el aprendizaje del turbo y el
+  historial de la gráfica. Desde `fase2.63` el almacén guarda la medida **tal
+  cual llegó** (`store_value()` ya no filtra): la evidencia y los máximos no
+  pueden ser la animación.
 
 ### 5.6 Reparto del ancho de banda por pantalla (FASE F3)
 
@@ -289,10 +340,10 @@ pantalla y deja pendientes de inmediato los PID que acaban de aparecer.
 ### 5.6b Enlace lento: reparto y estimación de capacidad (FASE K2, umbral en 585b75b)
 
 Esa tabla está dimensionada para CAN. En K-line con la que se planifica son
-**2,2 peticiones/s** (`PROFILE_LINK_CLASS_KLINE`; 383 ms por petición medida en
-la MX-5 son 2,6 físicos), así que quince PID no caben: el plan se comprime y
-reparte el presupuesto por niveles — RPM, valores visibles en la pantalla activa,
-y fondo.
+**2,5 peticiones/s** (`PROFILE_LINK_CLASS_KLINE`, subida desde 2,2 en `fase2.63`;
+383 ms por petición medida en la MX-5 son 2,6 físicos), así que quince PID no
+caben: el plan se comprime y reparte el presupuesto por niveles — RPM, valores
+visibles en la pantalla activa (cuántos, lo decide REPARTO: 5.5b), y fondo.
 
 Hay dos bucles de realimentación y conviene no confundirlos:
 

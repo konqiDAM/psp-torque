@@ -14,9 +14,11 @@
 static void test_plan_class(void)
 {
     CHECK_NEAR(obd_profile_link_class(OBD_PROTO_CAN), 16.5, 0.01);
-    CHECK_NEAR(obd_profile_link_class(OBD_PROTO_ISO9141), 2.2, 0.01);
-    CHECK_NEAR(obd_profile_link_class(OBD_PROTO_KWP), 2.2, 0.01);
-    CHECK_NEAR(obd_profile_link_class(OBD_PROTO_ANY), 2.2, 0.01);
+    /* 2,5: la MX-5 entrego 2,20-2,40 sostenidos y el techo fisico con
+     * 383 ms por peticion es 2,61. */
+    CHECK_NEAR(obd_profile_link_class(OBD_PROTO_ISO9141), 2.5, 0.01);
+    CHECK_NEAR(obd_profile_link_class(OBD_PROTO_KWP), 2.5, 0.01);
+    CHECK_NEAR(obd_profile_link_class(OBD_PROTO_ANY), 2.5, 0.01);
 }
 
 /* Con capacidad de CAN el plan es la tabla base, PID a PID y pantalla a
@@ -26,7 +28,7 @@ static void test_plan_can_identity(void)
     obd_link_plan plan;
     float demand = obd_profile_demand(0x01);   /* GENERAL */
 
-    obd_plan_init(&plan, PROFILE_LINK_CLASS_CAN, 67, demand);
+    obd_plan_init(&plan, PROFILE_LINK_CLASS_CAN, 67, demand, 4);
     CHECK(plan.compressed == 0);
     CHECK_NEAR(plan.budget, 14.02, 0.05);
 
@@ -46,31 +48,40 @@ static void test_plan_kline_arithmetic(void)
     obd_link_plan plan;
     float demand = obd_profile_demand(0x01);
 
-    obd_plan_init(&plan, 1.879f, 532, demand);
+    obd_plan_init(&plan, 1.879f, 532, demand, 4);
     CHECK(plan.compressed == 1);
     CHECK_NEAR(plan.budget, 1.597, 0.01);
 
-    /* RPM a 1 Hz contando el tiempo de servicio: 1000 - 532 = 468 ms. */
+    /* Tres valores reservan 0.6 Hz y el RESTANTE para el RPM sale por
+     * debajo de su minimo (1.597 - 0.6 < 1.0), asi que el RPM se queda el
+     * minimo: 1000/1.0 - 532 = 468 ms entre muestras. */
     uint16_t rpm = obd_plan_period(&plan, 0x0C, 1, 0, 3);
     CHECK(rpm == 468);
 
-    /* Cuatro valores con lo que queda: (1.597 - 1.0) / 4 = 0.149 Hz,
-     * o sea 1000/0.149 - 532 = 6179 ms. El margen cubre el redondeo. */
+    /* Cuatro valores se reparten lo que deja el RPM en proporcion a su
+     * suelo: (1.597 - 1.0) * 0.2/0.8 = 0.149 Hz, o sea 1000/0.149 - 532 =
+     * 6170 ms. El margen cubre el redondeo. */
     uint16_t v = obd_plan_period(&plan, 0x0D, 1, 1, 4);
     CHECK(v > 6000 && v < 6300);
 
-    /* El quinto valor ya no cabe: a fondo. */
-    CHECK(obd_plan_period(&plan, 0x11, 1, 5, 5) == PROFILE_PLAN_BG_PERIOD_MS);
+    /* El quinto valor ya no entra en el cupo (0.2 Hz de suelo) pero se
+     * pinta: se queda con la mitad de peso, o sea unos 14,5 s, no con el
+     * periodo de fondo. */
+    uint16_t slow = obd_plan_period(&plan, 0x11, 1, 5, 5);
+    CHECK(slow > 13000 && slow < 16000);
 
     /* Y lo que no se ve, tambien a fondo. */
     CHECK(obd_plan_period(&plan, 0x14, 0, 0, 3) == PROFILE_PLAN_BG_PERIOD_MS);
 
-    /* Con la capacidad teorica del enlace (1/0.383) el reparto es mas
-     * generoso, pero nunca por debajo del periodo base. */
-    obd_plan_init(&plan, 2.611f, 383, demand);
+    /* Con la capacidad fisica (2,611) el reparto nuevo si cabe: tres
+     * valores reservan 0.6 Hz y el RPM se queda 2.219 - 0.6 = 1.619 Hz,
+     * o sea 1000/1.619 - 383 = 234,7 -> 235 ms entre muestras. */
+    obd_plan_init(&plan, 2.611f, 383, demand, 4);
     uint16_t v2 = obd_plan_period(&plan, 0x0D, 1, 1, 3);
     CHECK(v2 < v);
-    CHECK(obd_plan_period(&plan, 0x0C, 1, 0, 3) == 617);
+    CHECK(obd_plan_period(&plan, 0x0C, 1, 0, 3) == 235);
+    /* Y los valores, su suelo: (2.219 - 1.619) / 3 = 0.2 Hz -> 4617 ms. */
+    CHECK(v2 > 4500 && v2 < 4700);
 
     /* Ningun periodo puede bajar del base ni pasar del tope. */
     for (int i = 0; i < 3; i++) {
@@ -92,7 +103,7 @@ static void test_plan_target_is_bounded(void)
 
     /* Lo que si cabe: el plan comprimido no pide mas del presupuesto. */
     obd_link_plan plan;
-    obd_plan_init(&plan, 1.879f, 532, obd_profile_demand(0x01));
+    obd_plan_init(&plan, 2.5f, 532, obd_profile_demand(0x01), 4);
     float total = 0.0f;
     total += 1000.0f / (float)(obd_plan_period(&plan, 0x0C, 1, 0, 3) + 532);
     for (int r = 1; r <= 3; r++) {
@@ -100,6 +111,61 @@ static void test_plan_target_is_bounded(void)
     }
     CHECK(total <= plan.budget + 0.01f);
     CHECK(total > 1.3f);   /* y que el reparto no se queda corto */
+}
+
+/* Ritmo real de un PID: el planificador cuenta el periodo desde el fin de
+ * la respuesta, asi que una muestra tarda periodo + servicio. */
+static float plan_rate(const obd_link_plan *plan, uint8_t pid, int visible,
+                       int rank, int value_count)
+{
+    uint16_t p = obd_plan_period(plan, pid, visible, rank, value_count);
+    return 1000.0f / (float)(p + plan->service_ms);
+}
+
+/* La condicion que de verdad importa con REPARTO: el plan no pide al
+ * enlace mas de lo que tiene, contando el RPM, los valores del cupo y los
+ * que se quedan fuera del cupo. Cuando los lentos se pagaban aparte esta
+ * cuenta salia hasta un 70 % por encima del presupuesto.
+ *
+ * En el rango normal la condicion es exacta. Por debajo de ~2 req/s queda
+ * el caso del suelo: el RPM se queda el presupuesto entero y los valores
+ * visibles bajan al suelo absoluto de 10 s (o al tope de 60 s si les toca
+ * una fraccion ridicula), asi que la suma se pasa un poco a proposito. */
+static void test_plan_never_oversubscribes(void)
+{
+    for (int c = 12; c <= 25; c++) {
+        float cap = (float)c / 10.0f;
+        for (int vc = 1; vc <= 10; vc++) {
+            for (int mv = 0; mv <= 4; mv++) {
+                obd_link_plan plan;
+                obd_plan_init(&plan, cap, 383, obd_profile_demand(0x01), mv);
+                float total = plan_rate(&plan, 0x0C, 1, 0, vc);
+                for (int r = 1; r <= vc; r++) {
+                    total += plan_rate(&plan, 0x0D, 1, r, vc);
+                }
+                if (cap >= 2.0f) {
+                    /* Exacto: el reparto pide justo el presupuesto. */
+                    CHECK(total <= plan.budget + 0.02f);
+                } else {
+                    /* Suelo: el RPM se queda el presupuesto y cada valor
+                     * visible que acaba en el tope de 60 s anade su
+                     * 1/60,3 req/s. */
+                    CHECK(total <= plan.budget + 0.02f +
+                                   (float)vc * (1000.0f / 60383.0f));
+                }
+            }
+        }
+    }
+
+    /* El caso del suelo, escrito: con el enlace en 0,8 req/s el RPM se
+     * queda el presupuesto (0,68) y los valores visibles sobreviven a
+     * 10 s. El planificador sirve al RPM primero, asi que el que cede es
+     * el cuadro, no la aguja. */
+    obd_link_plan floor;
+    obd_plan_init(&floor, PROFILE_LINK_RATE_FLOOR, 383,
+                  obd_profile_demand(0x01), 3);
+    CHECK(obd_plan_period(&floor, 0x0D, 1, 1, 4) == PROFILE_PLAN_VALUE_SLOW_MS);
+    CHECK(obd_plan_period(&floor, 0x0C, 1, 0, 4) >= 1000);
 }
 
 /* El estimador de capacidad: recorta cuando el enlace no llega, sube
@@ -148,19 +214,23 @@ static void test_capacity_estimator(void)
 static void test_plan_degenerate(void)
 {
     obd_link_plan plan;
-    obd_plan_init(&plan, 1.879f, 532, obd_profile_demand(0x01));
+    obd_plan_init(&plan, 1.879f, 532, obd_profile_demand(0x01), 4);
     uint16_t a = obd_plan_period(&plan, 0x0D, 1, 1, 3);
     uint16_t b = obd_plan_period(&plan, 0x0D, 1, 1, 3);
     CHECK(a == b);
 
     /* Sin valores en pantalla: el RPM se queda todo el presupuesto y
-     * ningun otro PID entra en el reparto. */
-    CHECK(obd_plan_period(&plan, 0x0C, 1, 0, 0) == 468);
+     * ningun otro PID entra en el reparto. El resultado lo limita el
+     * periodo base del RPM (200 ms), no el presupuesto: 1000/1.597 - 532
+     * sale negativo. */
+    CHECK(obd_plan_period(&plan, 0x0C, 1, 0, 0) == 200);
+    /* Con value_count 0 no hay trozo que repartir y el PID no entra en el
+     * reparto: periodo de fondo. */
     CHECK(obd_plan_period(&plan, 0x0D, 1, 1, 0) == PROFILE_PLAN_BG_PERIOD_MS);
 
     /* Un plan sin inicializar no puede devolver basura. */
     obd_link_plan zero;
-    obd_plan_init(&zero, 0.0f, 0, 0.0f);
+    obd_plan_init(&zero, 0.0f, 0, 0.0f, 4);
     CHECK(zero.capacity >= PROFILE_LINK_RATE_FLOOR);
     CHECK(zero.compressed == 0);
     CHECK(obd_plan_period(&zero, 0x0D, 1, 1, 3) ==
@@ -176,6 +246,7 @@ void test_plan(void)
     test_plan_can_identity();
     test_plan_kline_arithmetic();
     test_plan_target_is_bounded();
+    test_plan_never_oversubscribes();
     test_capacity_estimator();
     test_plan_degenerate();
 }

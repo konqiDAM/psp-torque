@@ -168,9 +168,17 @@ If it was left on a tool screen it opens GENERAL instead.
 
 ### Settings
 
-`START` opens the menu: `TEMA`, `IDIOMA` (auto/Spanish/English), `CONTRASTE`,
-`ANIMACION`, `MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`, `RPM MAX`,
-`UNIDADES` (metric/imperial), `TURBO AUTO`, `BOOST MAX`, `FPS` and `SALIR`.
+`START` opens the menu: `TEMA`, `COLOR`, `IDIOMA` (auto/Spanish/English),
+`CONTRASTE`, `ANIMACION`, `MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`,
+`RPM MAX`, `UNIDADES` (metric/imperial), `TURBO AUTO`, `BOOST MAX`, `HUECO ELM`,
+`PANTALLA INICIAL`, `DEBUG`, `LOG COMPLETO`, `AGUJA`, `REPARTO` and `SALIR`.
+
+`AGUJA` picks how much the tachometer and speedometer needles are eased
+(`DIRECT`, `SOFT` at 150 ms or `VERY SOFT` at 400 ms); numbers and bars always
+show the measurement as it arrives. `REPARTO` (0 to 4) decides how many
+on-screen values share the fast part of the link: lower means a faster needle.
+On a CAN car the split is not used (the base table fits whole), so `REPARTO`
+changes nothing on the MiTo.
 
 They are stored in `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` and applied
 immediately.
@@ -316,19 +324,22 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
   between what the active screen shows and what it does not, and is recomputed
   on every screen change or capacity change. The second measures what the
   adapter actually delivers and raises or lowers that budget every 10 s. On CAN
-  the plan targets 16.5 requests/s; on the MX-5's K-line, 2.2 (383 ms per
+  the plan targets 16.5 requests/s; on the MX-5's K-line, 2.5 (383 ms per
   request is 2.6 physical). A core test computes the demand and fails if it goes
   over budget.
-- **Tachometer needle prediction:** between samples the needle keeps moving in
-  the direction it was already going, so it does not trail the engine by a full
-  second, and the moment a measurement arrives the needle is exactly that
-  measurement. The lead is capped (1200 rpm), lasts one interval only, and holds
-  where it got to if the sample is late; below 25 rpm of change nothing is
-  predicted, so idle does not move the needle. The printed number, the session
-  peak and the shift and redline warnings are always the measurement, never the
-  prediction. Every other gauge is drawn with the measurement as it arrives.
-- **A 150 ms filter on the sample:** it removes noise from the measurement
-  itself when it is stored.
+- **Smoothed needle, nothing invented:** the tachometer and speedometer needles
+  move toward the last measurement every frame and stop there: they never
+  extrapolate past the last reading or invent a value. Numbers, bars and the
+  graph always show the measurement as it arrives. `NEEDLE` in the menu
+  picks `DIRECT`, `SOFT` (150 ms) or `VERY SOFT` (400 ms).
+- **Link split (`SPLIT`):** how many on-screen values share the fast part of the
+  link, from 0 to 4. Every visible value reserves its own floor and the rpm takes
+  the rest, so a lower `SPLIT` gives a faster needle; values that are drawn but do
+  not make the cut come back every ~10 s instead of blanking to `N/D`. Only what
+  is on screen counts, not everything the profile marks visible.
+- **The store keeps the measurement as it arrived:** the log, the peaks and the
+  graph history are evidence, not presentation. Smoothing lives only in what is
+  drawn.
 - **VBlank cadence:** drawing is synchronised with `sceDisplayGetVcount()`
   instead of with timers, and the number of VBlanks per frame adapts
   automatically to the CPU load.
