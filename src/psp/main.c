@@ -10602,14 +10602,21 @@ static void run_dashboard(Target *targets, int target_count)
         int draw_due = ((uint32_t)(vc - g_perf_last_vcount) >=
                         (uint32_t)(target_vb - 1));
 
-        if (draw_due) {
+        if (gap_pending) {
+            /* El hueco minimo del ELM327 manda sobre el dibujado. Antes se
+             * comprobaba primero el frame y, como un frame tarda ~33 ms, el
+             * hueco de 8 ms se medía como 41: la capacidad caia de ~12 a
+             * ~10 peticiones/s (fase2.44 del repo original). El dibujo se
+             * recupera en el siguiente VBlank; su cadencia no depende de
+             * esto. */
+            sceKernelDelayThread(2000);
+        } else if (draw_due) {
             draw_screen(now, requests, data_count,
                         no_data_count, timeouts, last_rtt);
-        } else if (rx.active || rx_just_done || gap_pending) {
-            /* Con una peticion en vuelo, o esperando el hueco minimo del
-             * adaptador, se duerme 2 ms en vez de un VBlank (16,7 ms).
-             * El dibujo no se resiente: su cadencia sigue la cuenta de
-             * VBlanks, no la del bucle. */
+        } else if (rx.active || rx_just_done) {
+            /* Con una peticion en vuelo se duerme 2 ms en vez de un VBlank
+             * (16,7 ms). El dibujo no se resiente: su cadencia sigue la
+             * cuenta de VBlanks, no la del bucle. */
             sceKernelDelayThread(2000);
         } else {
             /* Nada que dibujar: un VBlank como referencia. */
