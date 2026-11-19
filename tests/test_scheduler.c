@@ -222,3 +222,131 @@ void test_scheduler_strict(void)
     obd_sched_set_priority(&sched, 99, 3);
     obd_sched_set_strict(&sched, 1);
 }
+
+/* Aplazar un PID que no esta en pantalla: su primer turno se reparte dentro
+ * de su periodo en vez de salir todas las peticiones en el primer segundo.
+ * Es lo que en phase1_012 gasto 19 de 151 peticiones en datos que nadie
+ * veia. */
+void test_sched_defer(void)
+{
+    const uint16_t periods[] = { 100, 2000, 60000 };
+    const uint8_t pids[] = { 0x04, 0x0C, 0x21 };
+
+    /* El turno nuevo cae en el segundo tramo del periodo. */
+    for (unsigned p = 0; p < sizeof(periods) / sizeof(periods[0]); p++) {
+        for (unsigned k = 0; k < sizeof(pids) / sizeof(pids[0]); k++) {
+            obd_scheduler s;
+            obd_sched_init(&s);
+            int idx = obd_sched_add(&s, pids[k], periods[p], 2);
+            obd_sched_begin(&s, idx, 0);
+            obd_sched_end(&s, idx, 0, 1);
+            s.items[idx].next_due_ms = 0;      /* vencido */
+
+            obd_sched_defer(&s, idx, 1000u);
+            uint32_t delta = s.items[idx].next_due_ms - 1000u;
+            CHECK(delta >= periods[p] / 2u);
+            CHECK(delta < periods[p]);
+            CHECK(s.items[idx].period_ms == periods[p]);
+            CHECK(s.items[idx].priority == 2);
+        }
+    }
+
+    /* Un PID con turno en el futuro no se toca. */
+    obd_scheduler s;
+    obd_sched_init(&s);
+    int a = obd_sched_add(&s, 0x0C, 1000, 0);
+    s.items[a].next_due_ms = 6000u;
+    obd_sched_defer(&s, a, 1000u);
+    CHECK(s.items[a].next_due_ms == 6000u);
+
+    /* Vencido justo ahora o hace rato: siempre hacia adelante. */
+    s.items[a].next_due_ms = 1000u;
+    obd_sched_defer(&s, a, 1000u);
+    CHECK((int32_t)(s.items[a].next_due_ms - 1000u) > 0);
+    s.items[a].next_due_ms = 1000u - 5000u;
+    obd_sched_defer(&s, a, 1000u);
+    CHECK((int32_t)(s.items[a].next_due_ms - 1000u) > 0);
+
+    /* Los PID fuera de pantalla de la MX-5 no caen a la vez, y cada uno
+     * queda dentro del segundo tramo de su periodo. */
+    obd_scheduler seven;
+    obd_sched_init(&seven);
+    const uint8_t bg[] = { 0x04, 0x05, 0x06, 0x07, 0x11, 0x14, 0x15, 0x21 };
+    for (unsigned i = 0; i < sizeof(bg) / sizeof(bg[0]); i++) {
+        obd_sched_add(&seven, bg[i], 60000, 2);
+    }
+    for (int i = 0; i < seven.count; i++) {
+        obd_sched_defer(&seven, i, 1000u);
+    }
+    for (int i = 0; i < seven.count; i++) {
+        uint32_t delta = seven.items[i].next_due_ms - 1000u;
+        CHECK(delta >= 30000u && delta < 60000u);
+        for (int j = i + 1; j < seven.count; j++) {
+            CHECK(seven.items[i].next_due_ms != seven.items[j].next_due_ms);
+        }
+    }
+
+    /* Un PID sin confirmar (supported 0) si se aplaza: es el caso normal
+     * al arrancar, cuando la mascara aun no ha dicho nada. */
+    obd_scheduler unknown;
+    obd_sched_init(&unknown);
+    int u = obd_sched_add(&unknown, 0x33, 60000, 2);
+    CHECK(unknown.items[u].supported == 0);
+    obd_sched_defer(&unknown, u, 1000u);
+    CHECK(unknown.items[u].next_due_ms > 1000u);
+
+    /* El estado del PID no cambia, y el que esta en vuelo tampoco. */
+    obd_scheduler st;
+    obd_sched_init(&st);
+    int b = obd_sched_add(&st, 0x0F, 5000, 1);
+    st.items[b].no_data_count = 2;
+    st.items[b].supported = 1;
+    obd_sched_begin(&st, b, 100u);
+    obd_sched_defer(&st, b, 1000u);
+    CHECK(st.in_flight == b);
+    CHECK(st.items[b].no_data_count == 2);
+    CHECK(st.items[b].supported == 1);
+
+    /* Con el PID en vuelo no se aplaza nada. */
+    uint32_t before = st.items[b].next_due_ms;
+    CHECK(before == 0);
+    obd_sched_defer(&st, b, 1000u);
+    CHECK(st.items[b].next_due_ms == 0);
+
+    /* Cerrar la peticion manda: end reprograma sobre lo aplazado. */
+    obd_sched_end(&st, b, 2000u, 1);
+    CHECK(st.items[b].next_due_ms == 7000u);
+
+    /* Un PID no soportado no se toca. */
+    obd_scheduler park;
+    obd_sched_init(&park);
+    int c = obd_sched_add(&park, 0x14, 60000, 2);
+    park.items[c].supported = 2;
+    obd_sched_defer(&park, c, 1000u);
+    CHECK(park.items[c].next_due_ms == 0);
+
+    /* Periodo minimo: no hay tramo donde repartir y no puede dividir por
+     * cero. Se toca el campo a mano porque add/set_period lo fuerzan. */
+    obd_scheduler tiny;
+    obd_sched_init(&tiny);
+    int d = obd_sched_add(&tiny, 0x0D, 100, 1);
+    tiny.items[d].period_ms = 1;
+    obd_sched_defer(&tiny, d, 1000u);
+    CHECK(tiny.items[d].next_due_ms == 0);
+
+    /* Indices fuera de la tabla. */
+    obd_sched_defer(&tiny, -1, 1000u);
+    obd_sched_defer(&tiny, tiny.count, 1000u);
+
+    /* El reloj de 32 bits da la vuelta: se compara con signo. */
+    obd_scheduler wrap;
+    obd_sched_init(&wrap);
+    int e = obd_sched_add(&wrap, 0x0C, 60000, 0);
+    wrap.items[e].next_due_ms = 0xFFFFFFF0u;
+    obd_sched_defer(&wrap, e, 0xFFFFFFF0u);
+    /* El hueco se mide hacia adelante y sigue cayendo en el segundo tramo. */
+    uint32_t fwd = wrap.items[e].next_due_ms - 0xFFFFFFF0u;
+    CHECK(fwd >= 30000u && fwd < 60000u);
+    /* Y desde el reloj actual todavia no toca (comparacion con signo). */
+    CHECK((int32_t)(0xFFFFFFF0u - wrap.items[e].next_due_ms) < 0);
+}

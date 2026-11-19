@@ -95,6 +95,35 @@ void obd_sched_set_period(obd_scheduler *sched, int idx, uint16_t period_ms,
     }
 }
 
+void obd_sched_defer(obd_scheduler *sched, int idx, uint32_t now_ms)
+{
+    if (sched == NULL || idx < 0 || idx >= sched->count) {
+        return;
+    }
+    obd_poll_item *item = &sched->items[idx];
+    if (item->supported == 2 || sched->in_flight == idx) {
+        return;
+    }
+    uint32_t period = item->period_ms;
+    if (period < 2u) {
+        /* Sin tramo no hay donde repartir, y period/2 seria cero. */
+        return;
+    }
+    if ((int32_t)(now_ms - item->next_due_ms) < 0) {
+        /* Ya tiene turno en el futuro: no se toca. */
+        return;
+    }
+    uint32_t half = period / 2u;
+    if (half == 0u) {
+        half = 1u;
+    }
+    /* El hueco sale del PID. Con los medios periodos reales (5 s y 30 s)
+     * 977 es coprimo, asi que dos PID distintos no caen en el mismo
+     * milisegundo; con otros periodos el reparto sigue siendo valido,
+     * solo que dos PID podrian coincidir. */
+    item->next_due_ms = now_ms + half + ((uint32_t)item->pid * 977u) % half;
+}
+
 void obd_sched_end(obd_scheduler *sched, int idx, uint32_t now_ms,
                    int got_data)
 {

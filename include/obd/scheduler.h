@@ -42,6 +42,19 @@ void obd_sched_begin(obd_scheduler *sched, int idx, uint32_t now_ms);
 void obd_sched_set_period(obd_scheduler *sched, int idx, uint16_t period_ms,
                           int due_now);
 
+/* Aplaza un PID que ya esta vencido: le da su proximo turno dentro del
+ * segundo tramo de su periodo, con un hueco que depende del PID para que
+ * dos aplazados no vuelvan a la vez. Se usa con los PID que no estan en
+ * pantalla cuando la tabla se acaba de montar, para que su primer turno
+ * no se coma el enlace que necesita el RPM (en phase1_012 siete PID
+ * fuera de pantalla se llevaron 19 de las 151 peticiones del primer
+ * minuto).
+ *
+ * No hace nada si el PID ya tiene un turno en el futuro, si esta en
+ * vuelo, si esta marcado como no soportado o si su periodo es menor que
+ * 2 ms (no hay tramo donde repartirlo). */
+void obd_sched_defer(obd_scheduler *sched, int idx, uint32_t now_ms);
+
 /* Cierra la peticion: reprograma y cuenta NO DATA. */
 void obd_sched_end(obd_scheduler *sched, int idx, uint32_t now_ms,
                    int got_data);
@@ -61,6 +74,10 @@ int obd_sched_apply_mask(obd_scheduler *sched, uint32_t mask,
                          uint8_t first_pid);
 
 /* Reagenda todo (cambio de modo, reconexion). */
+/* Marca pendientes de inmediato todos los PID soportados. La app ya no lo
+ * usa (build_scheduler() deja la tabla entera pendiente): marcarlos todos
+ * es justo lo que hacia que los PID fuera de pantalla se comieran el
+ * primer minuto del enlace. Queda para los tests. */
 void obd_sched_reset_due(obd_scheduler *sched, uint32_t now_ms);
 
 #endif
