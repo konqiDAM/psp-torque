@@ -355,7 +355,11 @@ Hay dos bucles de realimentación y conviene no confundirlos:
    70 % de lo pedido, no en el 85 %, porque el plan ya pide solo el 85 % de la
    capacidad: con el listón en el 85 % un enlace sano se recortaba en cada
    ventana y el plan oscilaba entre 2,20 y 1,40 req/s (visto en
-   `phase1_008.log`).
+   `phase1_008.log`). La primera ventana de cada conexión no se mide: los PID
+   que no están en pantalla llegan aplazados (ver abajo), así que entrega menos
+   de lo que pide el plan sin que el enlace tenga nada, y contarla recortaba la
+   capacidad nada más conectar, que son siete ventanas de subida para
+   recuperarla.
 
 Un PID que **no está en pantalla** no se pide de golpe cuando se monta la tabla:
 llega vencido porque su periodo de fondo arranca caducado, así que

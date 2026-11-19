@@ -207,6 +207,7 @@ static obd_link_plan g_link_plan;
 static float g_plan_demand = 0.0f;      /* req/s que pide el plan actual */
 static uint32_t g_cap_window_ms = 0;
 static int g_cap_window_reqs = 0;
+static int g_cap_warmup = 0;   /* 1 = la primera ventana no se mide */
 static uint8_t g_prio_orig[OBD_SCHED_MAX];
 
 /* Capacidad con la que se planifica ahora mismo. */
@@ -4160,6 +4161,12 @@ static int connect_network_and_elm(Target *targets, int *target_count,
     scan_refresh_proto(sock, "conexion");
 
     build_scheduler();
+
+    /* La ventana de capacidad empieza de cero en cada conexion, y la
+     * primera no se mide (ver el bucle de sesion). */
+    g_cap_window_ms = 0;
+    g_cap_window_reqs = 0;
+    g_cap_warmup = 1;
 
     g_link_connected = 1;
     g_net_busy = 0;
@@ -10689,7 +10696,19 @@ static void run_dashboard(Target *targets, int target_count)
                     float asked = (g_plan_demand < g_link_plan.budget)
                                       ? g_plan_demand
                                       : g_link_plan.budget;
-                    float next = obd_capacity_next(base, rate, asked, ceiling);
+                    float next = g_link_measured;
+                    if (!g_cap_warmup) {
+                        next = obd_capacity_next(base, rate, asked, ceiling);
+                    } else {
+                        /* La primera ventana tras conectar no cuenta: los
+                         * PID que no estan en pantalla llegan aplazados, asi
+                         * que entrega menos de lo que pide el plan sin que
+                         * el enlace tenga nada. Medirla recortaba la
+                         * capacidad en el primer tramo y costaba siete
+                         * ventanas volver. */
+                        g_cap_warmup = 0;
+                        log_file_printf("Enlace: primera ventana, sin medir\n");
+                    }
                     if (next != g_link_measured) {
                         g_link_measured = next;
                         log_file_printf(
