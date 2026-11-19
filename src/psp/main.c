@@ -79,7 +79,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.63 2026-11-19 aguja sin prediccion, REPARTO y AGUJA ajustables"
+#define BUILD_TAG "fase2.64 2026-11-19 fuera de pantalla aplazados, primera ventana sin medir"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
