@@ -356,6 +356,20 @@ Hay dos bucles de realimentación y conviene no confundirlos:
    capacidad: con el listón en el 85 % un enlace sano se recortaba en cada
    ventana y el plan oscilaba entre 2,20 y 1,40 req/s (visto en
    `phase1_008.log`).
+
+Un PID que **no está en pantalla** no se pide de golpe cuando se monta la tabla:
+llega vencido porque su periodo de fondo arranca caducado, así que
+`obd_sched_defer()` le da su primer turno dentro del segundo tramo de su periodo,
+con un hueco que depende del PID (977 es coprimo con los medios periodos reales,
+así que dos PID distintos no coinciden; con periodos redondos de 10 o 60 s está
+garantizado). Con 60 s de periodo, el primer turno cae entre los 30 y los 60 s.
+En `phase1_012` siete PID fuera de pantalla gastaron 19 de las 151 peticiones
+del primer minuto, enlace que le faltaba al RPM; además, cada guardado de ajustes
+volvía a dispararlos todos, y en una sesión se guarda tres veces. El RPM nunca se
+aplaza (`pid == 0x0C` queda fuera), porque el plan le da su ritmo aunque la aguja
+no esté en un hueco: la marcha y los avisos salen de él. Solo se aplica con el
+plan comprimido: en CAN la tabla base cabe entera y el MiTo no cambia ni el orden
+de sus peticiones.
 Los huecos del GENERAL y las series de TELEMETRIA son configurables:
 cualquier PID puede acabar en pantalla, así que se fuerza su periodo base
 con un conjunto de bytes (`obd_forced_set`) que cubre todo el rango de

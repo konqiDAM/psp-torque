@@ -1359,11 +1359,13 @@ static void settings_apply(void)
      * camino del anterior. */
     disp_reset();
     if (g_link_connected) {
-        /* build_scheduler vuelve a montar la tabla y termina repartiendo
-         * con el plan de la pantalla activa, asi que un cambio de ajuste
-         * (AGUJA, REPARTO, tema) llega al enlace en el acto. */
+        /* build_scheduler vuelve a montar la tabla (todo pendiente) y
+         * termina repartiendo con el plan de la pantalla activa, asi que un
+         * cambio de ajuste (AGUJA, REPARTO, tema) llega al enlace en el
+         * acto. No se usa obd_sched_reset_due: marcaria tambien como
+         * pendientes los PID que no estan en pantalla y su primer turno se
+         * comeria el enlace que necesita el RPM. */
         build_scheduler();
-        obd_sched_reset_due(&g_sched, now_ms());
     }
     if (g_demo) {
         demo_apply_flags(1);
@@ -3716,8 +3718,20 @@ static void apply_screen_schedule(uint32_t now)
             period = 10000;
         }
         int was_due = (int32_t)(now - g_sched.items[i].next_due_ms) >= 0;
+        /* Lo que se pinta y acaba de aparecer pasa a pendiente al
+         * instante; lo que no se pinta y llega vencido (tabla recien
+         * montada, reconexion, cambio de pantalla) se aplaza dentro de su
+         * periodo: son datos que nadie ve y su primer turno se comia el
+         * enlace que necesita el RPM. En phase1_012, siete PID fuera de
+         * pantalla gastaron 19 de las 151 peticiones del primer minuto. */
         obd_sched_set_period(&g_sched, i, period,
                              visible && !was_due ? 1 : 0);
+        if (pid != 0x0C && !visible && was_due && g_link_plan.compressed) {
+            /* El RPM no se aplaza nunca: el plan le da su ritmo aunque la
+             * aguja no este en un hueco (la marcha y los avisos salen de
+             * el), y es el unico dato que se nota cuando va lento. */
+            obd_sched_defer(&g_sched, i, now);
+        }
 
         /* Con el enlace comprimido la prioridad pasa a ser el nivel del
          * plan (RPM, valores en pantalla, fondo). Sin comprimir se devuelve
