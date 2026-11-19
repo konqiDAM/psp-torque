@@ -4114,6 +4114,37 @@ static int connect_network_and_elm(Target *targets, int *target_count,
         return -1;
     }
 
+    /* Un ELM327 recien alimentado puede contestar 0100 con 00000000
+     * mientras fija el protocolo. Repetir la secuencia AT entera cuesta
+     * segundos; aqui se reintenta SOLO la mascara, dos veces y con una
+     * pausa corta, antes de arrancar con un dashboard incompleto
+     * (fase2.44 del repo original). */
+    if (g_mask1 == 0) {
+        for (int extra = 0; extra < 2 && !g_connect_cancel; extra++) {
+            /* La pausa se hace en trozos con connect_yield: asi el mando
+             * sigue vivo (SELECT cancela) y el aviso de la pantalla se
+             * mueve en vez de quedarse congelado 250 ms. */
+            for (int k = 0; k < 15 && !g_connect_cancel; k++) {
+                connect_yield();
+                sceKernelDelayThread(16 * 1000);
+            }
+            if (g_connect_cancel) {
+                break;
+            }
+            elm_flush_input(sock);
+            elm_send_and_read(sock, "0100", 2000, &reply);
+            if (reply.data && reply.frame.data_len >= 4) {
+                g_mask1 = obd_pid_mask(reply.frame.data,
+                                       reply.frame.data_len);
+            }
+            log_file_printf("mascara 0100 (reintento %d): %08X\n",
+                            extra + 1, (unsigned)g_mask1);
+            if (g_mask1 != 0) {
+                break;
+            }
+        }
+    }
+
     if (g_mask1 == 0) {
         log_file_printf("Handshake: adaptador sin datos OBD (0100=00000000)\n");
     }
