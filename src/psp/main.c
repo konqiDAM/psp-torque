@@ -474,7 +474,6 @@ static void draw_modules(void);
 static void build_scheduler(void);
 static void apply_screen_schedule(uint32_t now);
 static void demo_apply_flags(int on);
-static void demo_apply_car(int on);
 static float clamp_float(float v, float lo, float hi);
 
 /* Ajustes de tema persistidos en settings.txt. */
@@ -2692,7 +2691,6 @@ static void demo_update(uint32_t now)
  * se recupera el estado real del coche. */
 static void demo_apply_flags(int on)
 {
-    demo_apply_car(on);
     if (on) {
         /* Demo del MX-5 NB2: MAF (0x10) manda, la mariposa es la estandar
          * (0x11) y los trims y el avance van con la codificacion normal. El
@@ -2719,34 +2717,6 @@ static void demo_apply_flags(int on)
             g_mask2 == 0x80022001u &&
             g_mask3 == 0xC0C00000u);
     }
-}
-
-/* El demo viste el perfil del MX-5: tacometro 8000 con zona roja en 7000 y
- * corte en 7200, centro de MAF (el bloque de aire/aceite/agua del GENERAL) y
- * nombre del coche. Todo sale de la tabla de vehicle.c, no de copias, y con
- * el perfil puesto el indicador de marcha usa la misma tabla que el demo.
- * No se guarda nada: al salir del demo vuelve lo global. */
-static void demo_apply_car(int on)
-{
-    const obd_vehicle_profile *p = obd_vehicle_by_id("MAZDA_MX5_NB2");
-
-    if (p == NULL) {
-        return;
-    }
-    if (on) {
-        g_profile_tach = p->rpm_max;
-        g_profile_redline = p->redline;
-        g_profile_cut = p->fuel_cut;
-        g_vehicle_centre = p->centre;
-        snprintf(g_vehicle_id, sizeof(g_vehicle_id), "%s", p->id);
-        snprintf(g_vehicle_name, sizeof(g_vehicle_name), "%s", p->name);
-    } else {
-        vehicle_release_tacho();
-        g_vehicle_centre = OBD_CENTRE_FROM_CAPS;
-        g_vehicle_id[0] = '\0';
-        g_vehicle_name[0] = '\0';
-    }
-    layout_apply_for_car();
 }
 
 static void demo_toggle(void)
