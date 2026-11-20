@@ -15,8 +15,8 @@
  * el numero no salte 2,5 bar justo en el umbral del termosato. */
 
 /* bar para unas rpm y una temperatura de agua. water_known = 0 usa la
- * curva fria: es la lectura que no puede hacer pensar que el motor esta
- * mejor de lo que esta. */
+ * curva fria, que es la suposicion correcta en un arranque: mientras el
+ * agua no llega no hay forma de saber si el motor esta caliente. */
 float obd_oil_bar(float rpm, float water_c, int water_known);
 
 #endif

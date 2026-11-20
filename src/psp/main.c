@@ -822,7 +822,10 @@ static int slot_item_eff(int i)
      * Antes esto solo se aplicaba a la vista de fabrica, asi que en cuanto
      * la tarjeta guardaba la vista del coche volvia a salir el BOOST. */
     int item = g_slot_item[i];
-    if (!g_map_supported) {
+    if (g_mask1 != 0 && !g_map_supported) {
+        /* Con mascaras leidas y sin MAP: el coche no tiene ese sensor. Sin
+         * mascaras (arranque, sin coche) no se sustituye nada, que si no el
+         * MiTo perdia su BOOST durante todo el handshake. */
         if (item == W_BOOST) {
             return g_maf_supported ? W_MAF : W_OFF;
         }
@@ -839,13 +842,17 @@ static int slot_style_eff(int i)
     if (i < 0 || i >= DASH_SLOTS) {
         return STYLE_OFF;
     }
+    /* Un hueco oculto sigue oculto aunque el coche cambie su dato. */
+    if (g_slot_style[i] == STYLE_OFF) {
+        return STYLE_OFF;
+    }
     if (slot_item_eff(i) == W_AUX) {
         return STYLE_TEXT;
     }
     if (slot_item_eff(i) != g_slot_item[i]) {
-        /* Lo que el coche pone en el hueco se pinta como texto: MAF,
-         * MARCHA, AVANCE y el bloque no son barras. */
-        return STYLE_TEXT;
+        /* Lo que el coche pone en el hueco se pinta como texto, salvo la
+         * carga, que es una barra como el boost al que sustituye. */
+        return (slot_item_eff(i) == W_LOAD) ? STYLE_BAR : STYLE_TEXT;
     }
     return g_slot_style[i];
 }
@@ -998,9 +1005,14 @@ static void layout_apply_for_car(void)
                                                     STYLE_GAUGE, STYLE_TEXT,
                                                     STYLE_TEXT, STYLE_TEXT,
                                                     STYLE_TEXT };
+            static const int old_st[DASH_SLOTS] = { STYLE_GAUGE,
+                                                    STYLE_GAUGE, STYLE_BAR,
+                                                    STYLE_TEXT, STYLE_TEXT,
+                                                    STYLE_TEXT };
             int is_old = 1;
             for (int i = 0; i < DASH_SLOTS; i++) {
-                if (g_slot_item[i] != old_qv[i]) {
+                if (g_slot_item[i] != old_qv[i] ||
+                    g_slot_style[i] != old_st[i]) {
                     is_old = 0;
                 }
             }
@@ -6735,8 +6747,19 @@ static void draw_widget_bar(float x, float y, float w, float h,
 static void draw_aux(const dash_data *d, float x, float y, float w, float h)
 {
     qv_panel(x, y, w, h);
+    char buf[32];
+
+    if (h < 120.0f) {
+        /* Hueco pequeno (una tarjeta vieja o una mano en settings.txt): se
+         * pinta una sola linea en vez de tres filas pisadas. */
+        snprintf(buf, sizeof(buf), "%s %s",
+                 d->maf_valid ? d->maf : "N/D", units_maf_name());
+        gfx_text((int)x + 8, (int)(y + h * 0.5f) - 4, "BLOQUE", QV_DIM, 1);
+        gfx_text((int)x + 8, (int)(y + h * 0.5f) + 6, buf, QV_TEXT, 1);
+        return;
+    }
+
     const float row = h / 3.0f;
-    char buf[16];
 
     gfx_text((int)x + 8, (int)y + 4, "MAF", QV_DIM, 1);
     gfx_text((int)x + 8, (int)y + 16,
@@ -7210,6 +7233,11 @@ static int widget_cycle(int item, int dir, int include_off)
             ni += n;
         }
         int cand = ni + lo;
+        /* BLOQUE solo lo pone el coche, en su hueco de 146 px: en un
+         * hueco pequeno las tres filas se pisan. */
+        if (cand == W_AUX) {
+            continue;
+        }
         if (cand == W_OFF || widget_available(cand)) {
             return cand;
         }

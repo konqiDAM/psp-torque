@@ -339,8 +339,9 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
 - **Panel adaptado al coche:** en la MX-5, que no tiene MAP, el GENERAL
   cambia el hueco del centro por un bloque con el aire (MAF), la presión de
   aceite **calculada** (marcada `EST`: ese coche no lleva sensor) y el agua; y
-  el hueco del MAP pasa a ser el avance. Las sustituciones valen también con
-  la vista guardada del coche.
+  el hueco del MAP pasa a ser el avance. Un BOOST o un MAP en un coche sin ese
+  sensor se sustituyen también con la vista guardada; el bloque y la marcha
+  llegan con la vista de fábrica o con la migración de una tarjeta vieja.
 - **Reparto del enlace (`REPARTO`):** cuántos valores de pantalla entran en el
   reparto rápido, de 0 a 4. Cada valor visible reserva su suelo y el RPM se lleva
   el resto, así que con `REPARTO` bajo la aguja va más rápida; los valores que se
