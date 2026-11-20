@@ -10464,16 +10464,6 @@ static void startup_animation(void)
  *   SQUARE   = abrir la configuracion WiFi de la PSP y reconectar
  *   SELECT   = ajustes de tema
  *   START    = abrir/cerrar el menu (opcion SALIR dentro) */
-/* Sin adaptador el cuadro no se queda en N/D: entra el demo del MX-5. El
- * chip DEMO de la barra avisa de que son datos simulados y el primer
- * TRIANGLE que conecte de verdad lo apaga. */
-static void demo_if_no_adapter(int sock)
-{
-    if (sock < 0 && !g_demo) {
-        demo_toggle();
-    }
-}
-
 static void run_dashboard(Target *targets, int target_count)
 {
     SceCtrlData pad;
@@ -10488,7 +10478,6 @@ static void run_dashboard(Target *targets, int target_count)
     g_exit_request = 0;
 
     int sock = connect_network_and_elm(targets, &target_count, 0);
-    demo_if_no_adapter(sock);
 
     uint32_t last_status = now_ms();
     int requests = 0;
@@ -10603,7 +10592,6 @@ static void run_dashboard(Target *targets, int target_count)
 
             sock = connect_network_and_elm(targets, &target_count,
                                            with_dialog);
-            demo_if_no_adapter(sock);
             now = now_ms();
 
             if (sock >= 0) {
