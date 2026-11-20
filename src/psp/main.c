@@ -497,12 +497,29 @@ typedef struct {
     int chime_gap;  /* fijo 9 decimas = 0,90 s; sin ajuste */
     int show_fps;   /* 1 = mostrar FPS en pantalla */
     int debug;      /* 1 = panel de diagnostico de rendimiento */
-    int log_full;   /* 1 = registrar cada peticion y cada respuesta */
+    int log;        /* 0 = sin archivo, 1 = sesion, 2 = completa */
+    int show;       /* 1 = modo escaparate: demo, rotacion, sin archivo */
     char profile[24]; /* perfil forzado (vehicle.h); vacio = autodetectar */
 } app_settings;
 
 static app_settings g_cfg = { 0, 0, 0, 1, 1, 0, 1, 1, 3,
-                              4000, 7000, 0, 1, 0, 15, 100, 9, 1, 0, 1, "" };
+                              4000, 7000, 0, 1, 0, 15, 100, 9, 1, 0, 2, 0,
+                              "" };
+
+/* Tema que se guarda en settings.txt. La rotacion del modo escaparate cambia
+ * g_cfg.theme cada pocos segundos, pero eso es solo lo que se pinta: si un
+ * guardado cualquiera (salir de la app, cerrar el menu) escribiera g_cfg.theme,
+ * la tarjeta se quedaria con el tema que tocaba en ese instante. */
+static int g_save_theme = 0;
+
+/* Modo escaparate de ESTE arranque. El ajuste show= solo se lee al arrancar:
+ * encenderlo en el menu es para el proximo encendido, y apagarlo a mitad de
+ * feria no deja el cuadro a medias con el enlace muerto. */
+static int g_show_run = 0;
+
+/* Lineas que settings_load() no puede escribir todavia: corre antes que
+ * log_open(), porque el propio ajuste LOG decide si hay archivo. */
+static char g_settings_log[192];
 
 /* FASE F1: hueco minimo entre el fin de una respuesta y el envio del
  * siguiente comando al ELM327. Medido: con 0 ms el clon retrasa su
@@ -1126,7 +1143,8 @@ static const char *tr(const char *key)
         { "SIN MODO 02", "NO MODE 02" },
         { "X: GUARDAR  START: CERRAR  MANTENER START: SALIR",
           "X: SAVE  START: CLOSE  HOLD START: EXIT" },
-        { "LOG COMPLETO", "FULL LOG" },
+        { "MODO SHOW", "SHOW MODE" },
+        { "SESION", "SESSION" },
         { "AGUJA", "NEEDLE" },
         { "REPARTO", "SPLIT" },
         { "DIRECTA", "DIRECT" },
@@ -1157,10 +1175,12 @@ static const char *tr(const char *key)
     return key;
 }
 
-#define SET_COUNT 21
-#define SET_NEEDLE 18
-#define SET_SPLIT  19
-#define SET_EXIT   20
+#define SET_COUNT 22
+#define SET_LOG    17
+#define SET_SHOW   18
+#define SET_NEEDLE 19
+#define SET_SPLIT  20
+#define SET_EXIT   21
 
 static int g_settings_open = 0;
 static int g_settings_sel = 0;
@@ -1303,6 +1323,12 @@ static int g_log_broken = 0;
 static void log_open(void)
 {
     g_log_path[0] = '\0';
+    if (g_cfg.log <= 0 || g_show_run) {
+        /* Sin archivo a proposito: no hay aviso de SIN LOG que dar. En modo
+         * escaparate no se escribe nada en la tarjeta, y el LOG elegido en
+         * el menu sigue guardado para cuando se salga del modo. */
+        return;
+    }
     log_pick_path();
     g_log_fd = sceIoOpen(g_log_path,
                          PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC,
@@ -1674,6 +1700,20 @@ static void prefs_capture(void)
     }
 }
 
+/* Aviso de la carga de ajustes que se escribe cuando el log ya existe. */
+static void settings_note(const char *fmt, ...)
+{
+    va_list ap;
+    int used = (int)strlen(g_settings_log);
+
+    if (used >= (int)sizeof(g_settings_log) - 1) {
+        return;
+    }
+    va_start(ap, fmt);
+    vsnprintf(g_settings_log + used, sizeof(g_settings_log) - used, fmt, ap);
+    va_end(ap);
+}
+
 static void settings_load(void)
 {
     int psp_lang = PSP_SYSTEMPARAM_LANGUAGE_ENGLISH;
@@ -1698,6 +1738,10 @@ static void settings_load(void)
     g_cfg.chime_kmh = 100;
     g_cfg.chime_gap = 9;
     g_cfg.debug = 0;
+    g_cfg.show_fps = 1;
+    g_cfg.log = 2;
+    g_cfg.show = 0;
+    g_settings_log[0] = '\0';
 
     /* Vista personalizada: valores de fabrica de los seis huecos. */
     g_slot_item[0] = W_RPM;   g_slot_style[0] = STYLE_GAUGE;
@@ -1738,7 +1782,7 @@ static void settings_load(void)
             }
             n += chunk;
             if (n >= (int)sizeof(buf) - 1) {
-                log_file_printf("Ajustes: fichero truncado a %d bytes\n",
+                settings_note("Ajustes: fichero truncado a %d bytes\n",
                                 n);
                 break;
             }
@@ -1846,9 +1890,16 @@ static void settings_load(void)
                     }
                 } else if (strcmp(key, "debug") == 0) {
                     g_cfg.debug = atoi(val) ? 1 : 0;
+                } else if (strcmp(key, "log") == 0) {
+                    int v = atoi(val);
+                    g_cfg.log = (v < 0) ? 0 : (v > 2 ? 2 : v);
                 } else if (strcmp(key, "log_full") == 0 ||
                            strcmp(key, "log_completo") == 0) {
-                    g_cfg.log_full = atoi(val) ? 1 : 0;
+                    /* Clave antigua: 1 = cada peticion, 0 = solo la sesion. */
+                    g_cfg.log = atoi(val) ? 2 : 1;
+                } else if (strcmp(key, "show") == 0 ||
+                           strcmp(key, "escaparate") == 0) {
+                    g_cfg.show = atoi(val) ? 1 : 0;
                 } else if (strcmp(key, "elm_gap") == 0 ||
                            strcmp(key, "hueco_elm") == 0) {
                     int v = atoi(val);
@@ -1927,7 +1978,10 @@ static void settings_load(void)
     }
     g_cfg.show_fps = g_cfg.show_fps ? 1 : 0;
     g_cfg.debug = g_cfg.debug ? 1 : 0;
-    g_cfg.log_full = g_cfg.log_full ? 1 : 0;
+    if (g_cfg.log < 0) g_cfg.log = 0;
+    if (g_cfg.log > 2) g_cfg.log = 2;
+    g_cfg.show = g_cfg.show ? 1 : 0;
+    g_save_theme = g_cfg.theme;
 
     /* El aviso INITIAL D es fijo... */
     g_cfg.chime_kmh = 100;
@@ -1967,7 +2021,7 @@ static void settings_load(void)
             for (int i = 0; i < TEL_SLOTS; i++) {
                 g_tel_item[i] = new_tel[i];
             }
-            log_file_printf("Series de telemetria: migradas al juego nuevo\n");
+            settings_note("Series de telemetria: migradas al juego nuevo\n");
         }
     }
 
@@ -1985,11 +2039,21 @@ static void settings_load(void)
     g_global_rpm_max = g_cfg.rpm_max;
     g_layout_user = !layout_is_factory();
 
-    log_file_printf("Ajustes: tema=%s contraste=%d animacion=%s%s\n",
-                    gfx_theme_name(g_cfg.theme), g_cfg.contrast,
-                    g_cfg.anim == 0 ? "NO"
-                                    : (g_cfg.anim == 1 ? "MITO" : "MX-5"),
-                    g_layout_user ? " vista=PROPIA" : " vista=FABRICA");
+    settings_note("Ajustes: tema=%s contraste=%d animacion=%s%s\n",
+                  gfx_theme_name(g_cfg.theme), g_cfg.contrast,
+                  g_cfg.anim == 0 ? "NO"
+                                  : (g_cfg.anim == 1 ? "MITO" : "MX-5"),
+                  g_layout_user ? " vista=PROPIA" : " vista=FABRICA");
+}
+
+/* Se llama justo despues de log_open(): vuelca lo que la carga de ajustes
+ * dejo anotado. Antes estas lineas se escribian directamente y, al pasar la
+ * carga antes de abrir el archivo, se perdian en cada sesion. */
+static void settings_log_summary(void)
+{
+    if (g_settings_log[0] != '\0') {
+        log_file_printf("%s", g_settings_log);
+    }
 }
 
 static void settings_save(void)
@@ -2060,14 +2124,16 @@ static void settings_save(void)
                      "tel4_item=%d\n"
                      "fps_show=%d\n"
                      "debug=%d\n"
-                     "log_full=%d\n"
+                     "log=%d\n"
+                     "show=%d\n"
                      "elm_gap=%d\n"
                      "last=%d\n"
                      "profile=%s\n"
                      "version=2\n"
                      "start=%s\n"
                      "hidden=%s\n",
-                     g_cfg.theme, g_cfg.color, g_cfg.lang, g_cfg.contrast, g_cfg.anim,
+                     g_save_theme, g_cfg.color, g_cfg.lang,
+                     g_cfg.contrast, g_cfg.anim,
                      g_cfg.fast, g_cfg.peak_hold,
                      g_cfg.needle, g_cfg.split_values,
                      g_cfg.shift_rpm, g_global_rpm_max,
@@ -2082,7 +2148,8 @@ static void settings_save(void)
                      g_global_tel_item[0], g_global_tel_item[1],
                      g_global_tel_item[2], g_global_tel_item[3],
                      g_global_tel_item[4],
-                     g_cfg.show_fps, g_cfg.debug, g_cfg.log_full,
+                     g_cfg.show_fps, g_cfg.debug, g_cfg.log,
+                     g_cfg.show,
                      g_elm_min_gap_ms, g_mode,
                      g_cfg.profile,
                      g_start_mode >= 0 ? mode_key(g_start_mode) : "last",
@@ -3381,7 +3448,7 @@ static void elm_send_and_read(int sock, const char *cmd, int wait_ms,
     /* FASE K1b: con el registro completo activado se apunta cada peticion y
      * cada respuesta. Es lo que permite reconstruir una sesion sin adivinar
      * (y lo que pidio ivan para poder mandar el log entero). */
-    if (g_cfg.log_full) {
+    if (g_cfg.log >= 2) {
         const char *st = reply->data ? "OK"
                         : (reply->no_data ? "NO DATA"
                         : (reply->error ? "ERROR"
@@ -7631,10 +7698,20 @@ static void draw_settings_overlay(void)
             label = "DEBUG";
             snprintf(value, sizeof(value), "%s",
                      g_cfg.debug ? "SI" : "NO");
-        } else if (i == 17) {
-            label = tr("LOG COMPLETO");
+        } else if (i == SET_LOG) {
+            /* Tres estados: sin archivo, la sesion, o cada peticion. */
+            label = "LOG";
+            if (g_cfg.log <= 0) {
+                snprintf(value, sizeof(value), "%s", tr("NO"));
+            } else if (g_cfg.log == 1) {
+                snprintf(value, sizeof(value), "%s", tr("SESION"));
+            } else {
+                snprintf(value, sizeof(value), "%s", tr("COMPLETO"));
+            }
+        } else if (i == SET_SHOW) {
+            label = tr("MODO SHOW");
             snprintf(value, sizeof(value), "%s",
-                     g_cfg.log_full ? "SI" : "NO");
+                     g_cfg.show ? "SI" : "NO");
         } else if (i == SET_NEEDLE) {
             label = tr("AGUJA");
             snprintf(value, sizeof(value), "%s",
@@ -10011,6 +10088,7 @@ static int handle_settings_input(unsigned int pressed)
                 g_cfg.theme = (g_cfg.theme + dir + GFX_THEME_COUNT) %
                               GFX_THEME_COUNT;
             } while (g_cfg.theme >= 1 && g_cfg.theme <= 4);
+            g_save_theme = g_cfg.theme;
         } else if (g_settings_sel == 1) {
             if (g_cfg.theme == 0) {
                 g_cfg.color = (g_cfg.color + dir + 5) % 5;
@@ -10104,8 +10182,12 @@ static int handle_settings_input(unsigned int pressed)
             }
         } else if (g_settings_sel == 16) {
             g_cfg.debug = !g_cfg.debug;
-        } else if (g_settings_sel == 17) {
-            g_cfg.log_full = !g_cfg.log_full;
+        } else if (g_settings_sel == SET_LOG) {
+            g_cfg.log = (g_cfg.log + dir + 3) % 3;
+        } else if (g_settings_sel == SET_SHOW) {
+            /* Se aplica al arrancar: es el arranque el que no debe esperar
+             * a la red. Apagarlo ahora para la rotacion en el acto. */
+            g_cfg.show = g_cfg.show ? 0 : 1;
         } else if (g_settings_sel == SET_NEEDLE) {
             /* 0 = la medida tal cual, 1 = suave (150 ms), 2 = muy suave
              * (400 ms). Cambiar esto solo afecta a lo que se pinta. */
@@ -10373,12 +10455,52 @@ static void startup_animation(void)
     }
 }
 
+/* Modo escaparate: el cuadro se conduce solo. Cambia de pantalla y de tema
+ * sin tocar el adaptador ni escribir nada en la tarjeta. */
+#define SHOW_SCREEN_MS 12000u
+#define SHOW_THEME_MS  30000u
+#define SHOW_PAUSE_MS  60000u
+
+static int show_next_theme(int t)
+{
+    /* Temas 1-4 son variantes de color del NORMAL: la rotacion se los salta
+     * igual que el menu. */
+    static const int ring[] = { 0, 5, 6, 7, 8, 9, 10, 12, 13 };
+    const int n = (int)(sizeof(ring) / sizeof(ring[0]));
+
+    for (int i = 0; i < n; i++) {
+        if (ring[i] == t) {
+            return ring[(i + 1) % n];
+        }
+    }
+    return ring[0];
+}
+
 /* Dashboard unico. Arranca siempre, con o sin adaptador, y permite
  * reintentar la conexion sin salir de la aplicacion:
  *   TRIANGLE = reintentar el perfil WiFi guardado
  *   SQUARE   = abrir la configuracion WiFi de la PSP y reconectar
  *   SELECT   = ajustes de tema
  *   START    = abrir/cerrar el menu (opcion SALIR dentro) */
+/* Salida del modo escaparate: SELECT+START mantenidos dos segundos. Nadie
+ * llega ahi sin querer y el dueno sale sin tocar el cable de corriente. */
+static uint32_t g_show_exit_ms = 0;
+
+static void show_exit_tick(uint32_t now, unsigned int buttons)
+{
+    const unsigned int both = PSP_CTRL_SELECT | PSP_CTRL_START;
+
+    if ((buttons & both) == both) {
+        if (g_show_exit_ms == 0) {
+            g_show_exit_ms = now ? now : 1;
+        } else if ((uint32_t)(now - g_show_exit_ms) >= 2000u) {
+            g_exit_request = 1;
+        }
+    } else {
+        g_show_exit_ms = 0;
+    }
+}
+
 static void run_dashboard(Target *targets, int target_count)
 {
     SceCtrlData pad;
@@ -10392,7 +10514,11 @@ static void run_dashboard(Target *targets, int target_count)
     g_session_start_ms = start;
     g_exit_request = 0;
 
-    int sock = connect_network_and_elm(targets, &target_count, 0);
+    /* En modo escaparate no se toca la red: ni WiFi ni adaptador. El cuadro
+     * arranca en SIM y se queda ahi toda la sesion. */
+    int sock = g_show_run
+                   ? -1
+                   : connect_network_and_elm(targets, &target_count, 0);
 
     uint32_t last_status = now_ms();
     int requests = 0;
@@ -10418,12 +10544,18 @@ static void run_dashboard(Target *targets, int target_count)
     }
 
     log_file_printf("Dashboard %s\n",
-                    sock >= 0 ? "con adaptador" : "sin adaptador (N/D)");
+                    g_show_run ? "modo escaparate (SIM)"
+                               : (sock >= 0 ? "con adaptador"
+                                            : "sin adaptador (N/D)"));
     log_sync();
 
-    /* L+R mantenidos 1,5 s: activa/desactiva el modo demo. */
+    /* L+R mantenidos 1,5 s: activa/desactiva el modo demo. En modo
+     * escaparate no se permite apagarlo: alguien pulsando en la feria no
+     * puede dejar el cuadro diciendo N/D hasta que vuelva el dueno. */
     uint32_t chord_since = 0;
     int chord_done = 0;
+    uint32_t show_screen_at = 0;
+    uint32_t show_theme_at = 0;
 
     /* FASE D1: peticion OBD en vuelo (una sola). */
     elm_rx rx;
@@ -10448,9 +10580,28 @@ static void run_dashboard(Target *targets, int target_count)
         unsigned int pressed = pad.Buttons & ~g_prev_buttons;
         g_prev_buttons = pad.Buttons;
 
+        /* Escaparate: el mando es del cuadro. START (menu), SELECT (selector y
+         * editor de series), TRIANGLE/SQUARE (reconectar y WiFi) y CROSS
+         * (editores y lecturas) quedan fuera, para que nadie en la feria deje
+         * la app en un menu o pidiendo datos. El pad sigue moviendo de
+         * pantalla, y SELECT+START mantenidos dos segundos cierran la app. */
+        if (g_show_run) {
+            show_exit_tick(now, pad.Buttons);
+            pressed &= (PSP_CTRL_UP | PSP_CTRL_DOWN | PSP_CTRL_LEFT |
+                        PSP_CTRL_RIGHT | PSP_CTRL_LTRIGGER |
+                        PSP_CTRL_RTRIGGER);
+        }
+
         unsigned int chord = pad.Buttons &
             (PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER);
-        if (chord == (PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER)) {
+        if (g_show_run && chord == (PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER)) {
+            /* El acorde no hace nada y L/R tampoco llega al cambio de
+             * pantalla desde aqui: en la feria nadie puede dejar el cuadro
+             * sin datos de un manotazo. */
+            pressed &= ~(PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER);
+            chord_since = 0;
+            chord_done = 0;
+        } else if (chord == (PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER)) {
             if (chord_since == 0) {
                 chord_since = now ? now : 1;
             } else if (!chord_done &&
@@ -10481,12 +10632,14 @@ static void run_dashboard(Target *targets, int target_count)
          * no se ejecuta nada de eso y el log se queda sin cierre, que es
          * exactamente lo que paso el 18/11/2026. Una pulsacion corta sigue
          * abriendo y cerrando el menu. */
-        exit_hold_tick(now, pad.Buttons);
+        if (!g_show_run) {
+            exit_hold_tick(now, pad.Buttons);
+        }
 
         /* Reintento de conexion; deshabilitado con los ajustes abiertos.
          * El selector de pantallas se cierra antes: si no, taparia el
          * aviso de CONECTANDO y SELECT pasaria a cancelar la conexion. */
-        if (!g_settings_open &&
+        if (!g_settings_open && !g_show_run &&
             (pressed & (PSP_CTRL_TRIANGLE | PSP_CTRL_SQUARE))) {
             int with_dialog = (pressed & PSP_CTRL_SQUARE) ? 1 : 0;
             g_picker_open = 0;
@@ -10520,6 +10673,36 @@ static void run_dashboard(Target *targets, int target_count)
             continue;
         }
 
+        /* Modo escaparate: pantalla y tema solos. Una pulsacion cualquiera
+         * deja el cuadro quieto un minuto para poder ensenar algo, y luego
+         * vuelve a girar. */
+        if (g_show_run) {
+            if (pressed) {
+                show_screen_at = now + SHOW_PAUSE_MS;
+                show_theme_at = now + SHOW_PAUSE_MS;
+            } else if (show_screen_at == 0) {
+                show_screen_at = now + SHOW_SCREEN_MS;
+                show_theme_at = now + SHOW_THEME_MS;
+            }
+            if (show_screen_at != 0 && !g_settings_open && !g_picker_open &&
+                (int32_t)(now - show_screen_at) >= 0) {
+                g_mode = mode_step(g_mode, 1);
+                apply_screen_schedule(now);
+                log_file_printf("Show: pantalla %s\n", mode_name(g_mode));
+                show_screen_at = now + SHOW_SCREEN_MS;
+                draw_screen(now, requests, data_count, no_data_count,
+                            timeouts, last_rtt);
+            }
+            if (show_theme_at != 0 && !g_settings_open && !g_picker_open &&
+                (int32_t)(now - show_theme_at) >= 0) {
+                g_cfg.theme = show_next_theme(g_cfg.theme);
+                settings_apply();
+                log_file_printf("Show: tema %s\n",
+                                gfx_theme_name(g_cfg.theme));
+                show_theme_at = now + SHOW_THEME_MS;
+            }
+        }
+
         if (handle_ui_input(pressed)) {
             uint32_t draw_now = now_ms();
             draw_screen(draw_now, requests, data_count,
@@ -10529,6 +10712,15 @@ static void run_dashboard(Target *targets, int target_count)
         if (g_exit_request) {
             g_exit_request = 0;
             log_file_printf("Salida solicitada: cierre limpio\n");
+            /* El escaparate dura una sesion: al salir se apaga en el archivo,
+             * para que el proximo encendido sea un arranque normal con su
+             * adaptador. Es la unica escritura que hace una sesion de feria. */
+            if (g_show_run) {
+                g_cfg.show = 0;
+                /* Y la pantalla que se guarda es la de antes del desfile,
+                 * no la que tocaba en el momento de salir. */
+                g_mode = g_last_saved_mode;
+            }
             /* Guardar al salir sella la pantalla donde se dejo. */
             settings_save();
             break;
@@ -10880,7 +11072,7 @@ static void run_dashboard(Target *targets, int target_count)
             /* Un cambio de pantalla se escribe una sola vez, y solo si la
              * pantalla lleva unos segundos quieta: repasar las pantallas con
              * L/R no debe escribir la tarjeta en cada paso. */
-            if (g_last_saved_mode != g_mode) {
+            if (!g_show_run && g_last_saved_mode != g_mode) {
                 if (g_mode_since_ms == 0) {
                     g_mode_since_ms = now;
                 } else if ((uint32_t)(now - g_mode_since_ms) >= 5000u) {
@@ -11001,19 +11193,26 @@ int main(void)
     sceIoMkdir("ms0:/PSP/SAVEDATA", 0777);   /* el firmware la crea */
     sceIoMkdir(LOG_DIR, 0777);
 
-    /* Solo archivo: la pantalla grafica es lo primero que se ve. */
+    /* Los ajustes primero: el propio ajuste LOG decide si hay archivo, y
+     * abrirlo para cerrarlo acto seguido dejaria el archivo vacio en la
+     * tarjeta. */
+    settings_load();
+    g_show_run = g_cfg.show;
+
     log_open();
     log_file_printf("PSP Torque - fase 2\n");
     log_file_printf("build: %s\n", BUILD_TAG);
     log_file_printf("log: %s\n\n", g_log_path);
+    settings_log_summary();
 
-    /* Paleta y estado inicial, aun sin GU. */
-    settings_load();
     proto_load();
     /* Se arranca donde se quedo, pero solo si era una pantalla de
      * conduccion: abrir siempre en SNIFFER no sirve al conducir. */
     /* start= manda; si no hay, la ultima pantalla de conduccion. */
-    if (g_start_mode >= 0 && g_start_mode < MODE_COUNT) {
+    if (g_show_run) {
+        /* En la feria se abre siempre por el cuadro grande. */
+        g_mode = MODE_QV;
+    } else if (g_start_mode >= 0 && g_start_mode < MODE_COUNT) {
         g_mode = g_start_mode;
     } else {
         g_mode = mode_is_driving(g_last_mode) ? g_last_mode : MODE_QV;
@@ -11041,26 +11240,35 @@ int main(void)
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
 
     /* Los modulos de red se cargan detras de la GUI, con aviso grafico. */
-    net_ui_set("INICIANDO RED");
-    g_net_busy = 1;
-    g_net_ui_last = 0;
-    net_ui_tick();
+    if (g_show_run) {
+        /* Escaparate: ni modulos de red ni espera de WiFi. El SIM se enciende
+         * aqui, antes del cuadro, para que la primera pantalla ya tenga
+         * datos: es lo que se ve al encender en la feria. */
+        if (!g_demo) {
+            demo_toggle();
+        }
+    } else {
+        net_ui_set("INICIANDO RED");
+        g_net_busy = 1;
+        g_net_ui_last = 0;
+        net_ui_tick();
 
-    int ret;
-    ret = sceUtilityLoadNetModule(PSP_NET_MODULE_COMMON);
-    log_file_printf("net common: 0x%08X\n", ret);
-    ret = sceUtilityLoadNetModule(PSP_NET_MODULE_INET);
-    log_file_printf("net inet  : 0x%08X\n", ret);
-    ret = sceNetInit(0x20000, 0x20, 0x1000, 0x20, 0x1000);
-    log_file_printf("sceNetInit: 0x%08X\n", ret);
-    ret = sceNetInetInit();
-    log_file_printf("inet init : 0x%08X\n", ret);
-    ret = sceNetApctlInit(0x8000, 0x30);
-    log_file_printf("apctl init: 0x%08X\n", ret);
-    ret = sceNetResolverInit();
-    log_file_printf("resolver  : 0x%08X\n", ret);
-    log_sync();
-    g_net_busy = 0;
+        int ret;
+        ret = sceUtilityLoadNetModule(PSP_NET_MODULE_COMMON);
+        log_file_printf("net common: 0x%08X\n", ret);
+        ret = sceUtilityLoadNetModule(PSP_NET_MODULE_INET);
+        log_file_printf("net inet  : 0x%08X\n", ret);
+        ret = sceNetInit(0x20000, 0x20, 0x1000, 0x20, 0x1000);
+        log_file_printf("sceNetInit: 0x%08X\n", ret);
+        ret = sceNetInetInit();
+        log_file_printf("inet init : 0x%08X\n", ret);
+        ret = sceNetApctlInit(0x8000, 0x30);
+        log_file_printf("apctl init: 0x%08X\n", ret);
+        ret = sceNetResolverInit();
+        log_file_printf("resolver  : 0x%08X\n", ret);
+        log_sync();
+        g_net_busy = 0;
+    }
 
     run_dashboard(targets, target_count);
 
@@ -11108,7 +11316,7 @@ int main(void)
         snprintf(result, sizeof(result), "INCOMPLETO");
     }
     log_printf("RESULTADO: %s\n", result);
-    log_printf("Log: %s\n", g_log_path);
+    log_printf("Log: %s\n", g_log_path[0] ? g_log_path : "desactivado");
     log_printf("\nSTART: salir\n");
     log_sync();
 
