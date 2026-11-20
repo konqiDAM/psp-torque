@@ -51,7 +51,7 @@ whatever your ECU actually supports.
   adapter and ECU identity, the PID masks, the raw header and then asks for
   every PID once. It tells you what an unknown car can actually deliver
   instead of tuning the scheduler blind.
-- **Demo mode** with a ~130 s synthetic driving profile, so you can try the
+- **Demo mode** of the MX-5 with a 90 s synthetic driving profile, so you can try the
   interface without a car.
 - **Per-session log** on the Memory Stick, including performance metrics
   (CPU, wait, VBlanks, vertices) and a final session summary.
@@ -171,7 +171,7 @@ If it was left on a tool screen it opens GENERAL instead.
 `START` opens the menu: `TEMA`, `COLOR`, `IDIOMA` (auto/Spanish/English),
 `CONTRASTE`, `ANIMACION`, `MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`,
 `RPM MAX`, `UNIDADES` (metric/imperial), `TURBO AUTO`, `BOOST MAX`, `HUECO ELM`,
-`PANTALLA INICIAL`, `DEBUG`, `LOG`, `MODO SHOW`, `AGUJA`, `REPARTO` and `SALIR`.
+`PANTALLA INICIAL`, `DEBUG`, `LOG`, `AGUJA`, `REPARTO` and `SALIR`.
 
 `AGUJA` picks how much the tachometer and speedometer needles are eased
 (`DIRECT`, `SOFT` at 150 ms or `VERY SOFT` at 400 ms); numbers and bars always
@@ -186,14 +186,10 @@ factory value) also keeps every command and every reply. With logging switched
 off on purpose the `SIN LOG` warning does not appear: turning it off is a
 decision, not a failure.
 
-`MODO SHOW` boots the dashboard with no network and no adapter: it enters demo
-mode, changes screen every 12 s and theme every 30 s, and writes neither the
-log nor the settings. Any button press holds the dashboard still for a minute
-and then it keeps turning. `SELECT` and `START` held for two seconds exit the
-app and put a normal boot back on the card; the triggers, `TRIANGLE` and
-`SQUARE` do nothing in that mode, so nobody at a show can leave the dashboard
-in a menu or asking for data. It is switched on in the settings menu and takes
-effect on the next power-on.
+If the boot finds no adapter at all, the dashboard does not sit on `N/D`: it
+starts the MX-5 demo by itself. The header carries the `DEMO` chip, and as soon
+as `TRIANGLE` reaches the real car the demo goes off and the measurement takes
+over.
 
 They are stored in `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` and applied
 immediately.
@@ -221,12 +217,22 @@ stripes, segmented neon bars). Each one also adds its own effect:
 
 ## Demo mode
 
-Hold `L` + `R` for 1.5 seconds. The header shows `DEMO` and the dashboard
-displays a simulated car (idle, accelerating to 130 km/h, cruising, pulling
-to 185 km/h, then braking). Values are tagged `SIM` in the log.
+Hold `L` + `R` for 1.5 seconds, or boot the app with no adapter. The header
+shows `DEMO` and the dashboard presents a simulated MX-5 NB2: idle, a launch in
+first, a full pull in second to 6,800 rpm, third, a cruise in fifth around
+100 km/h, and braking to a stop, in a 90 s cycle that repeats.
 
-It needs neither car nor adapter: it is for trying themes, scales, units and
-the boost learning. The same combo turns it off.
+The numbers are that car's, not a turbo's: engine speed comes from road speed
+and the real six-speed ratios, MAF is the airflow that revs ask for (3 g/s at
+idle, ~83 at full throttle), MAP is naturally aspirated (30 kPa closed
+throttle, 96 at wide open), water sits at 88-92 °C and advance runs from 16
+degrees at full load to 36 while cruising. The oil pressure in the block is the
+calculated one as always, marked EST.
+
+It needs neither car nor adapter: it is for trying themes, scales and units,
+for a car show, and for seeing the dashboard with data without starting the
+engine. The same combo turns it off, and a real connection (`TRIANGLE`) turns
+it off by itself.
 
 ## Building from source
 

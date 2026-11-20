@@ -135,10 +135,11 @@ Con `log=2`, a los 1,9 req/s del coche de K-line eso son unos 9 KB por minuto, q
 Memory Stick no nota. Con `log_full=` en un archivo antiguo se lee como `log=2`, y
 `log_full=0` como `log=1`, así que una tarjeta de antes sigue funcionando sin tocar nada.
 
-`MODO SHOW` (`show=`, apagado de fábrica) es el modo feria: arranca en demo sin cargar
-los módulos de red ni esperar al adaptador, rota pantalla cada 12 s y tema cada 30 s, no
-abre el log y no guarda ajustes. Al salir con `SELECT+START` mantenidos se escribe
-`show=0`, así que el siguiente encendido vuelve a ser normal.
+El demo es del MX-5 NB2 desde `fase2.68` (`demo_update` en `main.c`): el régimen sale de
+la velocidad y de las relaciones del cambio de seis marchas, el MAF del caudal que pide
+ese régimen, el MAP es de atmosférico y el agua se queda en 88-92 °C. Si el arranque no
+encuentra adaptador, entra solo (`demo_if_no_adapter`), y el primer `TRIANGLE` que conecte
+lo apaga.
 
 The end of every session carries a `=== RESUMEN ===` block with the detected car, the
 measured link capacity and plan, the fault-code state and the session counters. Read that

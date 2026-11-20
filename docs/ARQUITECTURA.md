@@ -527,37 +527,45 @@ Esto es clave para distinguir “el coche no lo soporta” de “la app lo pide 
   cliente; además la ECU no multiplexa bien dos maestros de diagnóstico).
 - Bluetooth o USB: la PSP no los soporta de forma práctica para este uso.
 
-## 12. Modo escaparate y control del log (fase2.68)
+## 12. Demo del MX-5 y control del log (fase2.68)
 
-Dos cosas que no tocan el camino de conduccion: con `show=0` y `log=2` (los
-valores de fabrica) el codigo ejecuta exactamente lo de antes, y cada rama nueva
-prueba uno de esos dos ajustes.
+Dos cosas que no tocan el camino de conduccion: con `log=2` (el valor de
+fabrica) el codigo ejecuta exactamente lo de antes, y el demo solo entra por el
+acorde `L`+`R` o cuando el arranque no encuentra adaptador.
 
-**`show=`** (menu `MODO SHOW`) es el modo feria. Al arrancar:
+**El demo es del coche.** Hasta `fase2.67` simulaba el MiTo 1.4 turbo: MAP como
+fuente de la carga, pedal 0x49 y trims/avance con su codificacion. Ahora simula
+el MX-5 NB2:
 
-- `settings_load()` corre antes de `log_open()`, porque el ajuste LOG decide si
-  hay archivo que abrir. Las lineas que la carga deja anotadas se vuelcan en
-  `settings_log_summary()` en cuanto el archivo existe.
-- Con `show=1` se enciende el demo (`demo_toggle()`, el mismo generador del
-  acorde L+R) antes del cuadro, se saltan los modulos de red y
-  `connect_network_and_elm()` no se llama nunca: ni WiFi, ni handshake, ni una
-  peticion al coche. La pantalla inicial es siempre GENERAL.
-- Dentro del bucle, cada 12 s se avanza de pantalla con `mode_step()` (las
-  cuatro de conduccion, las mismas de L/R) y cada 30 s de tema con
-  `show_next_theme()` (se saltan los temas 1-4, que son colores del NORMAL, y
-  NOTHING, que no tiene nada que ensenar). Una pulsacion deja el cuadro quieto
-  60 s.
-- El mando queda aislado: `pressed` se enmascara a pad y gatillos, asi que
-  START (menu), SELECT (selector y editor de series), `TRIANGLE`/`SQUARE`
-  (reconectar y WiFi) y `CROSS` (editores y lecturas) no llegan a ninguna
-  parte. `SELECT+START` mantenidos dos segundos cierran la app.
-- La rotacion cambia `g_cfg.theme`, pero se guarda `g_save_theme`: lo que se
-  escribe en la tarjeta es el tema elegido por el dueno, no el que tocaba en el
-  momento de salir. Al salir se escribe `show=0`, de modo que el escaparate
-  dura una sesion y el siguiente encendido vuelve a ser normal.
+- El regimen sale de la velocidad y del cambio: `rpm = km/h x relacion x 36,94`,
+  con las relaciones del NB2 (3,815 / 2,260 / 1,640 / 1,177 / 1,000 / 0,832) y
+  el grupo 4,10 sobre rueda de 205/45R16. Asi el tacometro, el velocimetro y la
+  marcha que calcula la app no pueden contradecirse: es la misma historia.
+- El ciclo dura 90 s y lleva la marcha de cada tramo: ralenti, salida en
+  primera hasta 48 km/h, estirada completa en segunda hasta 82 km/h (6.848 rpm,
+  el corte), tercera hasta 96, quinta de crucero por encima de 100, frenada y
+  parada. Los tramos de 0,6 s son los cambios: el coche levanta el pie y pierde
+  unos km/h mientras sube de relacion.
+- `demo_apply_flags(1)` deja el MAF disponible (0x10) y la mariposa estandar
+  (0x11), con la codificacion normal de trims y avance. El MAP sigue en pie
+  para que el boost del TELEM y la presion de aceite calculada tengan de donde
+  salir.
+- Los valores son de atmosferico: MAP de 30 kPa con la mariposa cerrada a 96 a
+  fondo (los 200 kPa del MiTo en un MX-5 serian una averia), agua a 88-92 grados
+  y avance de 16 grados a fondo a 36 en crucero. El MAF se calcula del regimen y
+  la carga: 3 g/s al ralenti y ~83 a fondo, que es lo que midio la sonda del
+  coche real a 6.900 rpm.
+
+**Sin adaptador no se deja el cuadro en N/D.** `demo_if_no_adapter()` se llama
+tras el intento de conexion del arranque y tras un reintento fallido de
+`TRIANGLE`/`SQUARE`: si no hay socket entra el demo. El chip `DEMO` de la barra
+es el aviso, y el reintento que si conecta llama a `demo_toggle()` antes de
+pedir nada, asi que la medida real manda en cuanto hay coche.
 
 **`log=`** tiene tres posiciones: 0 no abre archivo (y por eso no sale el aviso
 `SIN LOG`: apagarlo es una decision), 1 guarda arranque, estado y resumen, y 2
 guarda ademas cada comando y cada respuesta, que es lo que hacia `log_full=1`.
-La clave vieja se sigue leyendo: `log_full=1` pasa a `log=2` y `log_full=0` a
-`log=1`.
+`settings_load()` corre antes de `log_open()` porque el ajuste decide si hay
+archivo, y `settings_log_summary()` vuelca justo despues del banner las lineas
+que la carga deja anotadas (fichero truncado, migracion de series y el resumen
+`Ajustes: tema=...`).

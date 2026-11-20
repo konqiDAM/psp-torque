@@ -51,7 +51,7 @@ capacidades reales de cualquier ECU.
   la identidad del adaptador y de la ECU, las máscaras de PID, la cabecera
   cruda y prueba cada PID uno a uno. Sirve para saber qué puede dar un coche
   que no es el de referencia, sin tocar el planificador a ciegas.
-- **Modo demo** con un perfil de conducción simulado de ~130 s, para probar la
+- **Modo demo** del MX-5 con un perfil de conducción simulado de 90 s, para probar la
   interfaz sin coche.
 - **Log por sesión** en la Memory Stick, con métricas de rendimiento
   (CPU, espera, VBlanks, vértices) y resumen final de la sesión.
@@ -173,7 +173,7 @@ salir. Si se quedó en una herramienta, abre GENERAL.
 `START` abre el menú: `TEMA`, `COLOR`, `IDIOMA` (auto/español/inglés),
 `CONTRASTE`, `ANIMACION`, `MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`,
 `RPM MAX`, `UNIDADES` (métrico/imperial), `TURBO AUTO`, `BOOST MAX`, `HUECO ELM`,
-`PANTALLA INICIAL`, `DEBUG`, `LOG`, `MODO SHOW`, `AGUJA`, `REPARTO` y `SALIR`.
+`PANTALLA INICIAL`, `DEBUG`, `LOG`, `AGUJA`, `REPARTO` y `SALIR`.
 
 `AGUJA` elige cuánto se suavizan las agujas del tacómetro y del velocímetro
 (`DIRECTA`, `SUAVE` de 150 ms o `MUY SUAVE` de 400 ms); los números y las barras
@@ -188,14 +188,10 @@ que viene de fábrica) guarda además cada petición y cada respuesta. Si el
 archivo está apagado a propósito no sale el aviso `SIN LOG`: apagarlo es una
 decisión, no un fallo.
 
-`MODO SHOW` arranca el cuadro sin red y sin adaptador: entra en el modo demo,
-cambia de pantalla cada 12 s y de tema cada 30 s, y no escribe ni el log ni los
-ajustes. Una pulsación cualquiera deja el cuadro quieto un minuto y luego sigue
-girando. `SELECT` y `START` mantenidos dos segundos cierran la app y devuelven
-el arranque normal a la tarjeta; los gatillos, `TRIANGLE` y `SQUARE` no hacen
-nada en ese modo, para que nadie en una feria deje el cuadro en un menú o
-pidiendo datos. Se enciende en el menú de ajustes y se aplica al siguiente
-encendido.
+Si el arranque no encuentra ningún adaptador, el cuadro no se queda en `N/D`:
+entra solo en el modo demo del MX-5. La cabecera lleva el chip `DEMO`, y en
+cuanto `TRIANGLE` conecte con el coche de verdad el demo se apaga y manda la
+medida.
 
 Se guardan en `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` y se aplican al
 instante.
@@ -224,12 +220,23 @@ propio:
 
 ## Modo demo
 
-Mantén `L` + `R` durante 1,5 segundos. La cabecera muestra `DEMO` y el panel
-presenta un coche simulado (ralenti, aceleración hasta 130 km/h, crucero,
-estirada hasta 185 km/h y frenada). Los valores se marcan como `SIM` en el log.
+Mantén `L` + `R` durante 1,5 segundos, o arranca la app sin adaptador. La
+cabecera muestra `DEMO` y el panel presenta un MX-5 NB2 simulado: ralenti,
+salida en primera, estirada completa en segunda hasta las 6.800 rpm, tercera,
+crucero en quinta alrededor de 100 km/h y frenada hasta parar, en un ciclo de
+90 s que se repite.
 
-No necesita coche ni adaptador: sirve para probar temas, escalas, unidades y
-el aprendizaje del turbo. Se desactiva con el mismo combo.
+Los valores son los de ese coche, no los de un turbo: el régimen sale de la
+velocidad y de las relaciones reales del cambio de seis marchas, el MAF es el
+caudal que pide ese régimen (3 g/s al ralenti, ~83 a fondo), el MAP es de
+atmosférico (30 kPa a mariposa cerrada, 96 a fondo), el agua se queda en 88-92
+°C y el avance va de 16 grados a fondo a 36 en crucero. La presión de aceite que
+enseña el bloque es la calculada de siempre, marcada EST.
+
+No necesita coche ni adaptador: sirve para probar temas, escalas y unidades,
+para una feria y para ver el cuadro con datos sin arrancar el motor. Se
+desactiva con el mismo combo, y al conectar de verdad (`TRIANGLE`) se apaga
+solo.
 
 ## Compilar desde el código
 

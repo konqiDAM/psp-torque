@@ -179,23 +179,24 @@ without going through the menu.
 
 **Done when:** that session's log exists and reaches the last second.
 
-### T20 — Show mode on the real PSP, and the card afterwards
+### T20 — MX-5 demo, auto-demo with no adapter, and the log switch
 
-**What we want to know:** that the feria mode behaves on the console as it does
-in the emulator, and that it leaves the card as it found it.
+**What we want to know:** that the MX-5 demo looks like his car on the console,
+that a boot with no adapter lands in it instead of on `N/D`, that a real
+connection takes over, and that `LOG = NO` really stops the card writes.
 
-**How:** switch `MODO SHOW` to `SI` in the settings menu, power the PSP off and
-on with no adapter in range. Then, once, hold `SELECT+START` for two seconds to
-leave the app.
+**How:** boot the PSP with the adapter unplugged, watch one full 90 s cycle
+(idle, first, the pull in second, third, cruise, stop). Then plug the adapter
+in, let it power up and press `TRIANGLE`. Then set `AJUSTES -> LOG` to `NO`,
+power cycle and check the card from a PC.
 
-**What to look for:** the dashboard with data in about two seconds and no
-`SIN WIFI`/`SIN ADAPTADOR` wait; the screen changing every 12 s and the palette
-every 30 s; the settings menu, the screen picker and `TRIANGLE`/`SQUARE` doing
-nothing while a visitor presses them; the rotation pausing for a minute after
-any press; and `show=0` in `settings.txt` after the exit, so the next power-on
-is a normal one (adapter, WiFi, log as configured).
+**What to look for:** the header chip `DEMO`; water at 88-92 °C; the pull
+reaching ~6,800 rpm at ~82 km/h with MAF near 83 g/s; the `MARCHA` tile showing
+the gear the demo is in; `TRIANGLE` dropping the chip and showing real values;
+and, with `LOG = NO`, no new `phase1_*.log` in
+`F:/PSP/SAVEDATA/PSPTORQUE/` after a session. With `LOG = COMPLETO` the summary
+line `Ajustes: tema=...` must still be the fifth line of the file.
 
-**Done when:** he has run it on the console at the show and the card was back to
-`show=0` afterwards; on the emulator this is already covered by the plan
-`docs/superpowers/plans/2026-11-20-modo-show.md`, including the
-`sha256` of `settings.txt` before and after.
+**Done when:** he has seen it on the console. The emulator already covers the
+mechanics (`docs/superpowers/plans/2026-11-21-demo-mx5.md`), but not whether
+the numbers read right to somebody who owns the car.

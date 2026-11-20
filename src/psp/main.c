@@ -474,6 +474,7 @@ static void draw_modules(void);
 static void build_scheduler(void);
 static void apply_screen_schedule(uint32_t now);
 static void demo_apply_flags(int on);
+static void demo_apply_car(int on);
 static float clamp_float(float v, float lo, float hi);
 
 /* Ajustes de tema persistidos en settings.txt. */
@@ -498,28 +499,15 @@ typedef struct {
     int show_fps;   /* 1 = mostrar FPS en pantalla */
     int debug;      /* 1 = panel de diagnostico de rendimiento */
     int log;        /* 0 = sin archivo, 1 = sesion, 2 = completa */
-    int show;       /* 1 = modo escaparate: demo, rotacion, sin archivo */
     char profile[24]; /* perfil forzado (vehicle.h); vacio = autodetectar */
 } app_settings;
 
 static app_settings g_cfg = { 0, 0, 0, 1, 1, 0, 1, 1, 3,
-                              4000, 7000, 0, 1, 0, 15, 100, 9, 1, 0, 2, 0,
-                              "" };
-
-/* Tema que se guarda en settings.txt. La rotacion del modo escaparate cambia
- * g_cfg.theme cada pocos segundos, pero eso es solo lo que se pinta: si un
- * guardado cualquiera (salir de la app, cerrar el menu) escribiera g_cfg.theme,
- * la tarjeta se quedaria con el tema que tocaba en ese instante. */
-static int g_save_theme = 0;
-
-/* Modo escaparate de ESTE arranque. El ajuste show= solo se lee al arrancar:
- * encenderlo en el menu es para el proximo encendido, y apagarlo a mitad de
- * feria no deja el cuadro a medias con el enlace muerto. */
-static int g_show_run = 0;
+                              4000, 7000, 0, 1, 0, 15, 100, 9, 1, 0, 2, "" };
 
 /* Lineas que settings_load() no puede escribir todavia: corre antes que
  * log_open(), porque el propio ajuste LOG decide si hay archivo. */
-static char g_settings_log[192];
+static char g_settings_log[256];
 
 /* FASE F1: hueco minimo entre el fin de una respuesta y el envio del
  * siguiente comando al ELM327. Medido: con 0 ms el clon retrasa su
@@ -1143,7 +1131,6 @@ static const char *tr(const char *key)
         { "SIN MODO 02", "NO MODE 02" },
         { "X: GUARDAR  START: CERRAR  MANTENER START: SALIR",
           "X: SAVE  START: CLOSE  HOLD START: EXIT" },
-        { "MODO SHOW", "SHOW MODE" },
         { "SESION", "SESSION" },
         { "AGUJA", "NEEDLE" },
         { "REPARTO", "SPLIT" },
@@ -1175,12 +1162,10 @@ static const char *tr(const char *key)
     return key;
 }
 
-#define SET_COUNT 22
-#define SET_LOG    17
-#define SET_SHOW   18
-#define SET_NEEDLE 19
-#define SET_SPLIT  20
-#define SET_EXIT   21
+#define SET_COUNT 21
+#define SET_NEEDLE 18
+#define SET_SPLIT  19
+#define SET_EXIT   20
 
 static int g_settings_open = 0;
 static int g_settings_sel = 0;
@@ -1323,10 +1308,8 @@ static int g_log_broken = 0;
 static void log_open(void)
 {
     g_log_path[0] = '\0';
-    if (g_cfg.log <= 0 || g_show_run) {
-        /* Sin archivo a proposito: no hay aviso de SIN LOG que dar. En modo
-         * escaparate no se escribe nada en la tarjeta, y el LOG elegido en
-         * el menu sigue guardado para cuando se salga del modo. */
+    if (g_cfg.log <= 0) {
+        /* Sin archivo a proposito: no hay aviso de SIN LOG que dar. */
         return;
     }
     log_pick_path();
@@ -1740,7 +1723,6 @@ static void settings_load(void)
     g_cfg.debug = 0;
     g_cfg.show_fps = 1;
     g_cfg.log = 2;
-    g_cfg.show = 0;
     g_settings_log[0] = '\0';
 
     /* Vista personalizada: valores de fabrica de los seis huecos. */
@@ -1897,9 +1879,6 @@ static void settings_load(void)
                            strcmp(key, "log_completo") == 0) {
                     /* Clave antigua: 1 = cada peticion, 0 = solo la sesion. */
                     g_cfg.log = atoi(val) ? 2 : 1;
-                } else if (strcmp(key, "show") == 0 ||
-                           strcmp(key, "escaparate") == 0) {
-                    g_cfg.show = atoi(val) ? 1 : 0;
                 } else if (strcmp(key, "elm_gap") == 0 ||
                            strcmp(key, "hueco_elm") == 0) {
                     int v = atoi(val);
@@ -1980,8 +1959,6 @@ static void settings_load(void)
     g_cfg.debug = g_cfg.debug ? 1 : 0;
     if (g_cfg.log < 0) g_cfg.log = 0;
     if (g_cfg.log > 2) g_cfg.log = 2;
-    g_cfg.show = g_cfg.show ? 1 : 0;
-    g_save_theme = g_cfg.theme;
 
     /* El aviso INITIAL D es fijo... */
     g_cfg.chime_kmh = 100;
@@ -2049,6 +2026,15 @@ static void settings_load(void)
 /* Se llama justo despues de log_open(): vuelca lo que la carga de ajustes
  * dejo anotado. Antes estas lineas se escribian directamente y, al pasar la
  * carga antes de abrir el archivo, se perdian en cada sesion. */
+/* Cabecera de cada archivo. Vive aparte porque abrir el log desde el menu
+ * (al pasar de NO a SESION o COMPLETO) tiene que volver a escribirla. */
+static void log_banner(void)
+{
+    log_file_printf("PSP Torque - fase 2\n");
+    log_file_printf("build: %s\n", BUILD_TAG);
+    log_file_printf("log: %s\n\n", g_log_path);
+}
+
 static void settings_log_summary(void)
 {
     if (g_settings_log[0] != '\0') {
@@ -2125,15 +2111,13 @@ static void settings_save(void)
                      "fps_show=%d\n"
                      "debug=%d\n"
                      "log=%d\n"
-                     "show=%d\n"
                      "elm_gap=%d\n"
                      "last=%d\n"
                      "profile=%s\n"
                      "version=2\n"
                      "start=%s\n"
                      "hidden=%s\n",
-                     g_save_theme, g_cfg.color, g_cfg.lang,
-                     g_cfg.contrast, g_cfg.anim,
+                     g_cfg.theme, g_cfg.color, g_cfg.lang, g_cfg.contrast, g_cfg.anim,
                      g_cfg.fast, g_cfg.peak_hold,
                      g_cfg.needle, g_cfg.split_values,
                      g_cfg.shift_rpm, g_global_rpm_max,
@@ -2149,7 +2133,6 @@ static void settings_save(void)
                      g_global_tel_item[2], g_global_tel_item[3],
                      g_global_tel_item[4],
                      g_cfg.show_fps, g_cfg.debug, g_cfg.log,
-                     g_cfg.show,
                      g_elm_min_gap_ms, g_mode,
                      g_cfg.profile,
                      g_start_mode >= 0 ? mode_key(g_start_mode) : "last",
@@ -2503,35 +2486,52 @@ static void demo_update(uint32_t now)
     g_demo_last = now;
     g_demo_t += dt;
 
-    /* Perfil de conduccion normal de ~130 s, basado en el uso real del
-     * MiTo: ralenti, salida ciudad, crucero, adelantamiento y vuelta a
-     * ralenti. Se repite sin cortes. */
-    /* Ciclo de 130 s: ralenti, aceleracion, crucero, estirada y frenada. */
-    static const float pts_t[] = {
-        0.0f, 6.0f, 21.0f, 33.0f, 43.0f, 57.0f, 66.0f,
-        78.0f, 88.0f, 98.0f, 108.0f, 118.0f, 130.0f
+    /* Ciclo de 90 s con el caracter del MX-5 NB2: ralenti, salida en
+     * primera, estirada completa en segunda hasta el corte, tercera,
+     * crucero en quinta, frenada y vuelta al ralenti. Se repite sin cortes.
+     *
+     * Cada tramo lleva su marcha, y el rpm sale de la velocidad con el
+     * cambio real del NB2 (relaciones 3,815 / 2,260 / 1,640 / 1,177 / 1,000
+     * / 0,832 y grupo 4,10 sobre rueda de 205/45R16): asi el tacometro, el
+     * velocimetro y la marcha que calcula la propia app cuentan la misma
+     * historia en vez de tres inventadas por separado. */
+    static const float seg_t[] = {
+        0.0f, 6.0f, 11.0f, 11.6f, 18.0f, 18.6f, 25.0f,
+        25.6f, 48.0f, 54.0f, 60.0f, 66.0f, 90.0f
     };
-    static const float pts_v[] = {
-        0.0f, 0.0f, 100.0f, 100.0f, 50.0f, 50.0f, 90.0f,
-        90.0f, 130.0f, 130.0f, 80.0f, 80.0f, 0.0f
+    /* Los tramos de 0,6 s son cambios de marcha: el coche levanta el pie y
+     * pierde unos km/h mientras sube de relacion, como en la carretera. */
+    static const float seg_v[] = {
+        0.0f, 0.0f, 55.0f, 52.0f, 101.0f, 97.0f, 120.0f,
+        116.0f, 105.0f, 60.0f, 20.0f, 0.0f, 0.0f
     };
-    static const int pts_n = 13;
+    static const int seg_g[] = {
+        0, 1, 1, 2, 2, 3, 3, 5, 5, 4, 3, 0, 0
+    };
+    /* Las relaciones no se copian aqui: son las del perfil del coche
+     * (MAZDA_MX5_NB2 en vehicle.c, medidas del coche real), que es la misma
+     * tabla con la que la app deduce la marcha. Asi el tacometro, el
+     * velocimetro y el indicador de marcha no pueden contradecirse. */
+    const obd_vehicle_profile *car = obd_vehicle_by_id("MAZDA_MX5_NB2");
+    const int seg_n = (int)(sizeof(seg_t) / sizeof(seg_t[0]));
 
-    float cycle = fmodf(g_demo_t, 130.0f);
+    float cycle = fmodf(g_demo_t, 90.0f);
     if (cycle < 0.0f) {
         cycle = 0.0f;
     }
 
     float target_speed = 0.0f;
     float slope = 0.0f;
-    for (int i = 0; i < pts_n - 1; i++) {
-        if (cycle >= pts_t[i] && cycle < pts_t[i + 1]) {
-            float span = pts_t[i + 1] - pts_t[i];
+    int gear = 0;
+    for (int i = 0; i < seg_n - 1; i++) {
+        if (cycle >= seg_t[i] && cycle < seg_t[i + 1]) {
+            float span = seg_t[i + 1] - seg_t[i];
             float frac = (span > 0.0f)
-                             ? (cycle - pts_t[i]) / span
+                             ? (cycle - seg_t[i]) / span
                              : 0.0f;
-            target_speed = pts_v[i] + (pts_v[i + 1] - pts_v[i]) * frac;
-            slope = (pts_v[i + 1] - pts_v[i]) / span;
+            target_speed = seg_v[i] + (seg_v[i + 1] - seg_v[i]) * frac;
+            slope = (seg_v[i + 1] - seg_v[i]) / span;
+            gear = seg_g[i];
             break;
         }
     }
@@ -2543,34 +2543,15 @@ static void demo_update(uint32_t now)
         g_demo_speed = 0.0f;
     }
 
-    static const float g_lo_spd[6] = { 0.0f, 25.0f, 45.0f, 65.0f,
-                                       90.0f, 115.0f };
-    static const float g_hi_spd[6] = { 30.0f, 50.0f, 70.0f, 95.0f,
-                                       120.0f, 160.0f };
-    static const float g_lo_rpm[6] = { 900.0f, 1500.0f, 1800.0f,
-                                       1900.0f, 2000.0f, 2200.0f };
-    static const float g_hi_rpm[6] = { 4500.0f, 4200.0f, 4000.0f,
-                                       3700.0f, 3400.0f, 3200.0f };
-
-    int gear = 5;
-    for (int i = 0; i < 5; i++) {
-        if (g_demo_speed < g_hi_spd[i]) {
-            gear = i;
-            break;
-        }
-    }
-
-    if (g_demo_speed < 1.0f) {
+    /* rpm = 1000 x velocidad / (km/h por 1000 rpm de esa marcha). Con la
+     * tabla del perfil, 101 km/h en segunda son 6.966 rpm, que es donde el
+     * coche corta, y 100 en quinta son 2.974, justo lo que marca el suyo. */
+    if (gear <= 0 || g_demo_speed < 1.0f || car == NULL ||
+        gear >= 6 || car->gear_kmh[gear - 1] <= 0.0f) {
         g_demo_rpm = 850.0f + sinf(g_demo_t * 2.0f) * 25.0f;
     } else {
-        float span = g_hi_spd[gear] - g_lo_spd[gear];
-        float within = 0.0f;
-        if (span > 0.0f) {
-            within = (g_demo_speed - g_lo_spd[gear]) / span;
-            within = clamp_float(within, 0.0f, 1.0f);
-        }
-        g_demo_rpm = g_lo_rpm[gear] +
-                     within * (g_hi_rpm[gear] - g_lo_rpm[gear]);
+        g_demo_rpm = g_demo_speed * 1000.0f / car->gear_kmh[gear - 1];
+        g_demo_rpm = clamp_float(g_demo_rpm, 850.0f, 7200.0f);
     }
 
     float accel_req = slope / 3.6f;
@@ -2587,21 +2568,26 @@ static void demo_update(uint32_t now)
         pedal += 12.0f;
         pedal = clamp_float(pedal, 0.0f, 95.0f);
     }
+    /* Una estirada de verdad es a fondo: con el pedal que sale de la
+     * pendiente (78-81 %) el MAP no pasaba de 83 kPa y el MAF de 77 g/s,
+     * que no es lo que ensena el coche cuando estira. */
+    if (slope > 3.0f && pedal < 92.0f) {
+        pedal = 92.0f;
+    }
 
     float plate = 12.5f + pedal * 0.77f;
     plate = clamp_float(plate, 12.5f, 89.5f);
 
+    /* El NB2 es atmosferico: 30 kPa con la mariposa cerrada, 96 a fondo, y
+     * en retencion baja de ahi. Nada de los 200 kPa del MiTo turbado, que en
+     * un MX-5 serian una averia y no una medida. */
     float baro_kpa = 97.6f + sinf(g_demo_t / 300.0f) * 0.6f;
-    float vac = 0.0f;
-    if (g_demo_speed > 5.0f && pedal < 8.0f) {
-        vac = 15.0f;
+    float map_kpa = 30.0f + (pedal / 100.0f) * 66.0f;
+    if (g_demo_speed > 5.0f && pedal < 3.0f) {
+        map_kpa = 26.0f;
     }
-    float boost = 0.0f;
-    if (pedal > 25.0f) {
-        boost = powf((pedal - 25.0f) / 75.0f, 1.2f) * 200.0f;
-    }
-    float map_kpa = 45.0f - (pedal / 100.0f) * 18.0f - vac + boost;
-    map_kpa = clamp_float(map_kpa, 20.0f, 236.0f);
+    map_kpa += sinf(g_demo_t * 1.7f) * 0.8f;
+    map_kpa = clamp_float(map_kpa, 20.0f, 100.0f);
 
     float load = 10.0f + pedal * 0.9f;
     if (g_demo_speed < 1.0f) {
@@ -2614,17 +2600,19 @@ static void demo_update(uint32_t now)
 
     float adv = 0.0f;
     if (g_demo_speed < 1.0f) {
-        adv = 5.0f + sinf(g_demo_t * 0.5f) * 2.0f;
+        adv = 10.0f + sinf(g_demo_t * 0.5f) * 2.0f;
     } else {
-        adv = 12.0f + (1.0f - load / 100.0f) * 30.0f -
-              (boost / 100.0f) * 10.0f;
+        /* Sin turbo no hay retardo por presion: el avance es funcion de la
+         * carga, de ~16 grados a fondo a ~36 en crucero. */
+        adv = 14.0f + (1.0f - load / 100.0f) * 26.0f;
     }
     adv += sinf(g_demo_t * 1.3f) * 1.5f;
     adv = clamp_float(adv, 0.0f, 60.0f);
 
-    float ect = 80.0f + 4.0f * (1.0f - expf(-g_demo_t / 240.0f)) +
-                sinf(g_demo_t / 45.0f) * 1.2f;
-    ect = clamp_float(ect, 27.0f, 90.0f);
+    /* Agua del NB2: se queda en 88-92 C, no en los 80 del MiTo. */
+    float ect = 88.0f + 3.0f * (1.0f - expf(-g_demo_t / 180.0f)) +
+                sinf(g_demo_t / 50.0f) * 1.0f;
+    ect = clamp_float(ect, 27.0f, 95.0f);
 
     float iat = 28.0f + 4.0f * sinf(g_demo_t / 90.0f) +
                 (1.0f - g_demo_speed / 130.0f) * 2.0f;
@@ -2689,6 +2677,11 @@ static void demo_update(uint32_t now)
                   OBD_SRC_SIMULATED);
     obd_store_set(&g_store, 0x15, o2_2, OBD_UNIT_VOLT, now,
                   OBD_SRC_SIMULATED);
+    /* MAF del MX-5: el caudal que pide ese regimen. Con carga 95 % y 6900
+     * rpm son 89 g/s, que es lo que midio la sonda del coche real. */
+    float maf = 1.5f + (g_demo_rpm * (load / 100.0f)) / 75.0f;
+    obd_store_set(&g_store, 0x10, maf, OBD_UNIT_GRAMS_SEC, now,
+                  OBD_SRC_SIMULATED);
     obd_store_set(&g_store, 0x21, g_demo_dist_mil, OBD_UNIT_KM, now,
                   OBD_SRC_SIMULATED);
 
@@ -2699,17 +2692,20 @@ static void demo_update(uint32_t now)
  * se recupera el estado real del coche. */
 static void demo_apply_flags(int on)
 {
+    demo_apply_car(on);
     if (on) {
-        /* Demo basado en el MiTo 1.4 170cv: MAP (sin MAF), pedal 0x49,
-         * combustible y trims/avance con la codificacion no estandar. */
+        /* Demo del MX-5 NB2: MAF (0x10) manda, la mariposa es la estandar
+         * (0x11) y los trims y el avance van con la codificacion normal. El
+         * MAP sigue disponible para que el boost del TELEM y la presion de
+         * aceite calculada tengan de donde salir. */
         g_oil_supported = 0;
         g_fuel_supported = 1;
         g_map_supported = 1;
-        g_maf_supported = 0;
-        g_pedal_supported = 1;
-        g_thr_pid = 0x49;
-        g_thr_label = "ACELERADOR";
-        obd_pid_set_mito_encoding(1);
+        g_maf_supported = 1;
+        g_pedal_supported = 0;
+        g_thr_pid = 0x11;
+        g_thr_label = "MARIPOSA";
+        obd_pid_set_mito_encoding(0);
     } else {
         g_oil_supported = 0;
         g_fuel_supported = 0;
@@ -2723,6 +2719,34 @@ static void demo_apply_flags(int on)
             g_mask2 == 0x80022001u &&
             g_mask3 == 0xC0C00000u);
     }
+}
+
+/* El demo viste el perfil del MX-5: tacometro 8000 con zona roja en 7000 y
+ * corte en 7200, centro de MAF (el bloque de aire/aceite/agua del GENERAL) y
+ * nombre del coche. Todo sale de la tabla de vehicle.c, no de copias, y con
+ * el perfil puesto el indicador de marcha usa la misma tabla que el demo.
+ * No se guarda nada: al salir del demo vuelve lo global. */
+static void demo_apply_car(int on)
+{
+    const obd_vehicle_profile *p = obd_vehicle_by_id("MAZDA_MX5_NB2");
+
+    if (p == NULL) {
+        return;
+    }
+    if (on) {
+        g_profile_tach = p->rpm_max;
+        g_profile_redline = p->redline;
+        g_profile_cut = p->fuel_cut;
+        g_vehicle_centre = p->centre;
+        snprintf(g_vehicle_id, sizeof(g_vehicle_id), "%s", p->id);
+        snprintf(g_vehicle_name, sizeof(g_vehicle_name), "%s", p->name);
+    } else {
+        vehicle_release_tacho();
+        g_vehicle_centre = OBD_CENTRE_FROM_CAPS;
+        g_vehicle_id[0] = '\0';
+        g_vehicle_name[0] = '\0';
+    }
+    layout_apply_for_car();
 }
 
 static void demo_toggle(void)
@@ -3127,7 +3151,7 @@ static int handle_line(elm_reply *reply, const char *line)
     } else {
         can_err_streak = 0;
     }
-    if (log_line) {
+    if (log_line && g_cfg.log >= 2) {
         log_file_printf("  %s\n", text);
     }
 
@@ -3233,7 +3257,10 @@ static int elm_rx_send(elm_rx *rx, uint32_t now)
 {
     char tx[64];
     snprintf(tx, sizeof(tx), "%s\r", rx->cmd);
-    log_file_printf("> %s%s\n", rx->cmd, rx->attempt ? " (reintento)" : "");
+    if (g_cfg.log >= 2) {
+        log_file_printf("> %s%s\n", rx->cmd,
+                        rx->attempt ? " (reintento)" : "");
+    }
 
     if (send_all(rx->sock, tx, (int)strlen(tx)) < 0) {
         return -1;
@@ -3399,10 +3426,12 @@ complete:
         rx->line_len = 0;
     }
 
-    log_file_printf("  [%s %dms%s]\n",
-                    rx->reply.prompt ? "prompt" : "sin prompt",
-                    (int)(now - rx->start),
-                    rx->reply.stopped ? " STOPPED" : "");
+    if (g_cfg.log >= 2) {
+        log_file_printf("  [%s %dms%s]\n",
+                        rx->reply.prompt ? "prompt" : "sin prompt",
+                        (int)(now - rx->start),
+                        rx->reply.stopped ? " STOPPED" : "");
+    }
 
     /* STOPPED: el ELM se atasco; reintentar una vez. */
     if (rx->reply.stopped && rx->attempt == 0) {
@@ -7698,7 +7727,7 @@ static void draw_settings_overlay(void)
             label = "DEBUG";
             snprintf(value, sizeof(value), "%s",
                      g_cfg.debug ? "SI" : "NO");
-        } else if (i == SET_LOG) {
+        } else if (i == 17) {
             /* Tres estados: sin archivo, la sesion, o cada peticion. */
             label = "LOG";
             if (g_cfg.log <= 0) {
@@ -7708,10 +7737,6 @@ static void draw_settings_overlay(void)
             } else {
                 snprintf(value, sizeof(value), "%s", tr("COMPLETO"));
             }
-        } else if (i == SET_SHOW) {
-            label = tr("MODO SHOW");
-            snprintf(value, sizeof(value), "%s",
-                     g_cfg.show ? "SI" : "NO");
         } else if (i == SET_NEEDLE) {
             label = tr("AGUJA");
             snprintf(value, sizeof(value), "%s",
@@ -10088,7 +10113,6 @@ static int handle_settings_input(unsigned int pressed)
                 g_cfg.theme = (g_cfg.theme + dir + GFX_THEME_COUNT) %
                               GFX_THEME_COUNT;
             } while (g_cfg.theme >= 1 && g_cfg.theme <= 4);
-            g_save_theme = g_cfg.theme;
         } else if (g_settings_sel == 1) {
             if (g_cfg.theme == 0) {
                 g_cfg.color = (g_cfg.color + dir + 5) % 5;
@@ -10182,12 +10206,21 @@ static int handle_settings_input(unsigned int pressed)
             }
         } else if (g_settings_sel == 16) {
             g_cfg.debug = !g_cfg.debug;
-        } else if (g_settings_sel == SET_LOG) {
+        } else if (g_settings_sel == 17) {
+            int was = g_cfg.log;
             g_cfg.log = (g_cfg.log + dir + 3) % 3;
-        } else if (g_settings_sel == SET_SHOW) {
-            /* Se aplica al arrancar: es el arranque el que no debe esperar
-             * a la red. Apagarlo ahora para la rotacion en el acto. */
-            g_cfg.show = g_cfg.show ? 0 : 1;
+            /* Se aplica en el acto: apagarlo y seguir escribiendo hasta el
+             * siguiente encendido era justo lo contrario de lo pedido. */
+            if (g_cfg.log != was) {
+                log_close();
+                if (g_cfg.log > 0) {
+                    log_open();
+                    log_banner();
+                    settings_log_summary();
+                    log_file_printf("AJUSTE: log = %d\n", g_cfg.log);
+                    log_sync();
+                }
+            }
         } else if (g_settings_sel == SET_NEEDLE) {
             /* 0 = la medida tal cual, 1 = suave (150 ms), 2 = muy suave
              * (400 ms). Cambiar esto solo afecta a lo que se pinta. */
@@ -10455,49 +10488,19 @@ static void startup_animation(void)
     }
 }
 
-/* Modo escaparate: el cuadro se conduce solo. Cambia de pantalla y de tema
- * sin tocar el adaptador ni escribir nada en la tarjeta. */
-#define SHOW_SCREEN_MS 12000u
-#define SHOW_THEME_MS  30000u
-#define SHOW_PAUSE_MS  60000u
-
-static int show_next_theme(int t)
-{
-    /* Temas 1-4 son variantes de color del NORMAL: la rotacion se los salta
-     * igual que el menu. */
-    static const int ring[] = { 0, 5, 6, 7, 8, 9, 10, 12, 13 };
-    const int n = (int)(sizeof(ring) / sizeof(ring[0]));
-
-    for (int i = 0; i < n; i++) {
-        if (ring[i] == t) {
-            return ring[(i + 1) % n];
-        }
-    }
-    return ring[0];
-}
-
 /* Dashboard unico. Arranca siempre, con o sin adaptador, y permite
  * reintentar la conexion sin salir de la aplicacion:
  *   TRIANGLE = reintentar el perfil WiFi guardado
  *   SQUARE   = abrir la configuracion WiFi de la PSP y reconectar
  *   SELECT   = ajustes de tema
  *   START    = abrir/cerrar el menu (opcion SALIR dentro) */
-/* Salida del modo escaparate: SELECT+START mantenidos dos segundos. Nadie
- * llega ahi sin querer y el dueno sale sin tocar el cable de corriente. */
-static uint32_t g_show_exit_ms = 0;
-
-static void show_exit_tick(uint32_t now, unsigned int buttons)
+/* Sin adaptador el cuadro no se queda en N/D: entra el demo del MX-5. El
+ * chip DEMO de la barra avisa de que son datos simulados y el primer
+ * TRIANGLE que conecte de verdad lo apaga. */
+static void demo_if_no_adapter(int sock)
 {
-    const unsigned int both = PSP_CTRL_SELECT | PSP_CTRL_START;
-
-    if ((buttons & both) == both) {
-        if (g_show_exit_ms == 0) {
-            g_show_exit_ms = now ? now : 1;
-        } else if ((uint32_t)(now - g_show_exit_ms) >= 2000u) {
-            g_exit_request = 1;
-        }
-    } else {
-        g_show_exit_ms = 0;
+    if (sock < 0 && !g_demo) {
+        demo_toggle();
     }
 }
 
@@ -10514,11 +10517,8 @@ static void run_dashboard(Target *targets, int target_count)
     g_session_start_ms = start;
     g_exit_request = 0;
 
-    /* En modo escaparate no se toca la red: ni WiFi ni adaptador. El cuadro
-     * arranca en SIM y se queda ahi toda la sesion. */
-    int sock = g_show_run
-                   ? -1
-                   : connect_network_and_elm(targets, &target_count, 0);
+    int sock = connect_network_and_elm(targets, &target_count, 0);
+    demo_if_no_adapter(sock);
 
     uint32_t last_status = now_ms();
     int requests = 0;
@@ -10544,18 +10544,14 @@ static void run_dashboard(Target *targets, int target_count)
     }
 
     log_file_printf("Dashboard %s\n",
-                    g_show_run ? "modo escaparate (SIM)"
-                               : (sock >= 0 ? "con adaptador"
-                                            : "sin adaptador (N/D)"));
+                    sock >= 0 ? "con adaptador"
+                              : (g_demo ? "sin adaptador, demo MX-5 (SIM)"
+                                        : "sin adaptador (N/D)"));
     log_sync();
 
-    /* L+R mantenidos 1,5 s: activa/desactiva el modo demo. En modo
-     * escaparate no se permite apagarlo: alguien pulsando en la feria no
-     * puede dejar el cuadro diciendo N/D hasta que vuelva el dueno. */
+    /* L+R mantenidos 1,5 s: activa/desactiva el modo demo. */
     uint32_t chord_since = 0;
     int chord_done = 0;
-    uint32_t show_screen_at = 0;
-    uint32_t show_theme_at = 0;
 
     /* FASE D1: peticion OBD en vuelo (una sola). */
     elm_rx rx;
@@ -10580,28 +10576,9 @@ static void run_dashboard(Target *targets, int target_count)
         unsigned int pressed = pad.Buttons & ~g_prev_buttons;
         g_prev_buttons = pad.Buttons;
 
-        /* Escaparate: el mando es del cuadro. START (menu), SELECT (selector y
-         * editor de series), TRIANGLE/SQUARE (reconectar y WiFi) y CROSS
-         * (editores y lecturas) quedan fuera, para que nadie en la feria deje
-         * la app en un menu o pidiendo datos. El pad sigue moviendo de
-         * pantalla, y SELECT+START mantenidos dos segundos cierran la app. */
-        if (g_show_run) {
-            show_exit_tick(now, pad.Buttons);
-            pressed &= (PSP_CTRL_UP | PSP_CTRL_DOWN | PSP_CTRL_LEFT |
-                        PSP_CTRL_RIGHT | PSP_CTRL_LTRIGGER |
-                        PSP_CTRL_RTRIGGER);
-        }
-
         unsigned int chord = pad.Buttons &
             (PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER);
-        if (g_show_run && chord == (PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER)) {
-            /* El acorde no hace nada y L/R tampoco llega al cambio de
-             * pantalla desde aqui: en la feria nadie puede dejar el cuadro
-             * sin datos de un manotazo. */
-            pressed &= ~(PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER);
-            chord_since = 0;
-            chord_done = 0;
-        } else if (chord == (PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER)) {
+        if (chord == (PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER)) {
             if (chord_since == 0) {
                 chord_since = now ? now : 1;
             } else if (!chord_done &&
@@ -10632,14 +10609,12 @@ static void run_dashboard(Target *targets, int target_count)
          * no se ejecuta nada de eso y el log se queda sin cierre, que es
          * exactamente lo que paso el 18/11/2026. Una pulsacion corta sigue
          * abriendo y cerrando el menu. */
-        if (!g_show_run) {
-            exit_hold_tick(now, pad.Buttons);
-        }
+        exit_hold_tick(now, pad.Buttons);
 
         /* Reintento de conexion; deshabilitado con los ajustes abiertos.
          * El selector de pantallas se cierra antes: si no, taparia el
          * aviso de CONECTANDO y SELECT pasaria a cancelar la conexion. */
-        if (!g_settings_open && !g_show_run &&
+        if (!g_settings_open &&
             (pressed & (PSP_CTRL_TRIANGLE | PSP_CTRL_SQUARE))) {
             int with_dialog = (pressed & PSP_CTRL_SQUARE) ? 1 : 0;
             g_picker_open = 0;
@@ -10658,6 +10633,7 @@ static void run_dashboard(Target *targets, int target_count)
 
             sock = connect_network_and_elm(targets, &target_count,
                                            with_dialog);
+            demo_if_no_adapter(sock);
             now = now_ms();
 
             if (sock >= 0) {
@@ -10673,36 +10649,6 @@ static void run_dashboard(Target *targets, int target_count)
             continue;
         }
 
-        /* Modo escaparate: pantalla y tema solos. Una pulsacion cualquiera
-         * deja el cuadro quieto un minuto para poder ensenar algo, y luego
-         * vuelve a girar. */
-        if (g_show_run) {
-            if (pressed) {
-                show_screen_at = now + SHOW_PAUSE_MS;
-                show_theme_at = now + SHOW_PAUSE_MS;
-            } else if (show_screen_at == 0) {
-                show_screen_at = now + SHOW_SCREEN_MS;
-                show_theme_at = now + SHOW_THEME_MS;
-            }
-            if (show_screen_at != 0 && !g_settings_open && !g_picker_open &&
-                (int32_t)(now - show_screen_at) >= 0) {
-                g_mode = mode_step(g_mode, 1);
-                apply_screen_schedule(now);
-                log_file_printf("Show: pantalla %s\n", mode_name(g_mode));
-                show_screen_at = now + SHOW_SCREEN_MS;
-                draw_screen(now, requests, data_count, no_data_count,
-                            timeouts, last_rtt);
-            }
-            if (show_theme_at != 0 && !g_settings_open && !g_picker_open &&
-                (int32_t)(now - show_theme_at) >= 0) {
-                g_cfg.theme = show_next_theme(g_cfg.theme);
-                settings_apply();
-                log_file_printf("Show: tema %s\n",
-                                gfx_theme_name(g_cfg.theme));
-                show_theme_at = now + SHOW_THEME_MS;
-            }
-        }
-
         if (handle_ui_input(pressed)) {
             uint32_t draw_now = now_ms();
             draw_screen(draw_now, requests, data_count,
@@ -10712,15 +10658,6 @@ static void run_dashboard(Target *targets, int target_count)
         if (g_exit_request) {
             g_exit_request = 0;
             log_file_printf("Salida solicitada: cierre limpio\n");
-            /* El escaparate dura una sesion: al salir se apaga en el archivo,
-             * para que el proximo encendido sea un arranque normal con su
-             * adaptador. Es la unica escritura que hace una sesion de feria. */
-            if (g_show_run) {
-                g_cfg.show = 0;
-                /* Y la pantalla que se guarda es la de antes del desfile,
-                 * no la que tocaba en el momento de salir. */
-                g_mode = g_last_saved_mode;
-            }
             /* Guardar al salir sella la pantalla donde se dejo. */
             settings_save();
             break;
@@ -11035,6 +10972,7 @@ static void run_dashboard(Target *targets, int target_count)
         if ((uint32_t)(now - last_status) >= 2000u) {
             float f;
             char rpm[16] = "N/D";
+            char maf[16] = "N/D";
             char map[16] = "N/D";
             char boost[16] = "N/D";
             char ect[16] = "N/D";
@@ -11042,17 +10980,18 @@ static void run_dashboard(Target *targets, int target_count)
             char spd[16] = "N/D";
 
             if (sample_value_raw(0x0C, now, &f)) fmt_0(rpm, sizeof(rpm), f);
+            if (sample_value_raw(0x10, now, &f)) fmt_1(maf, sizeof(maf), f);
             if (sample_value_raw(0x0B, now, &f)) fmt_0(map, sizeof(map), f);
             if (g_boost.boost_valid) fmt_1(boost, sizeof(boost), g_boost.boost_bar);
             if (sample_value_raw(0x05, now, &f)) fmt_0(ect, sizeof(ect), f);
             if (sample_value_raw(0x0F, now, &f)) fmt_0(iat, sizeof(iat), f);
             if (sample_value_raw(0x0D, now, &f)) fmt_0(spd, sizeof(spd), f);
 
-            log_file_printf("t=%u rpm=%s map=%s boost=%s ect=%s iat=%s "
-                            "spd=%s rtt=%d gap=%d gapcfg=%d ok=%d nd=%d "
-                            "to=%d fps=%d "
+            log_file_printf("t=%u rpm=%s maf=%s map=%s boost=%s ect=%s "
+                            "iat=%s spd=%s rtt=%d gap=%d gapcfg=%d ok=%d "
+                            "nd=%d to=%d fps=%d "
                             "cpu=%u wait=%u int=%u vb=%d v=%d%s\n",
-                            (unsigned)(session_ms / 1000), rpm, map,
+                            (unsigned)(session_ms / 1000), rpm, maf, map,
                             boost, ect, iat, spd, last_rtt,
                             (int)(gap_n ? (gap_acc / gap_n) : 0),
                             g_elm_min_gap_ms,
@@ -11072,7 +11011,7 @@ static void run_dashboard(Target *targets, int target_count)
             /* Un cambio de pantalla se escribe una sola vez, y solo si la
              * pantalla lleva unos segundos quieta: repasar las pantallas con
              * L/R no debe escribir la tarjeta en cada paso. */
-            if (!g_show_run && g_last_saved_mode != g_mode) {
+            if (g_last_saved_mode != g_mode) {
                 if (g_mode_since_ms == 0) {
                     g_mode_since_ms = now;
                 } else if ((uint32_t)(now - g_mode_since_ms) >= 5000u) {
@@ -11197,22 +11136,15 @@ int main(void)
      * abrirlo para cerrarlo acto seguido dejaria el archivo vacio en la
      * tarjeta. */
     settings_load();
-    g_show_run = g_cfg.show;
 
     log_open();
-    log_file_printf("PSP Torque - fase 2\n");
-    log_file_printf("build: %s\n", BUILD_TAG);
-    log_file_printf("log: %s\n\n", g_log_path);
+    log_banner();
     settings_log_summary();
-
     proto_load();
     /* Se arranca donde se quedo, pero solo si era una pantalla de
      * conduccion: abrir siempre en SNIFFER no sirve al conducir. */
     /* start= manda; si no hay, la ultima pantalla de conduccion. */
-    if (g_show_run) {
-        /* En la feria se abre siempre por el cuadro grande. */
-        g_mode = MODE_QV;
-    } else if (g_start_mode >= 0 && g_start_mode < MODE_COUNT) {
+    if (g_start_mode >= 0 && g_start_mode < MODE_COUNT) {
         g_mode = g_start_mode;
     } else {
         g_mode = mode_is_driving(g_last_mode) ? g_last_mode : MODE_QV;
@@ -11240,35 +11172,26 @@ int main(void)
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
 
     /* Los modulos de red se cargan detras de la GUI, con aviso grafico. */
-    if (g_show_run) {
-        /* Escaparate: ni modulos de red ni espera de WiFi. El SIM se enciende
-         * aqui, antes del cuadro, para que la primera pantalla ya tenga
-         * datos: es lo que se ve al encender en la feria. */
-        if (!g_demo) {
-            demo_toggle();
-        }
-    } else {
-        net_ui_set("INICIANDO RED");
-        g_net_busy = 1;
-        g_net_ui_last = 0;
-        net_ui_tick();
+    net_ui_set("INICIANDO RED");
+    g_net_busy = 1;
+    g_net_ui_last = 0;
+    net_ui_tick();
 
-        int ret;
-        ret = sceUtilityLoadNetModule(PSP_NET_MODULE_COMMON);
-        log_file_printf("net common: 0x%08X\n", ret);
-        ret = sceUtilityLoadNetModule(PSP_NET_MODULE_INET);
-        log_file_printf("net inet  : 0x%08X\n", ret);
-        ret = sceNetInit(0x20000, 0x20, 0x1000, 0x20, 0x1000);
-        log_file_printf("sceNetInit: 0x%08X\n", ret);
-        ret = sceNetInetInit();
-        log_file_printf("inet init : 0x%08X\n", ret);
-        ret = sceNetApctlInit(0x8000, 0x30);
-        log_file_printf("apctl init: 0x%08X\n", ret);
-        ret = sceNetResolverInit();
-        log_file_printf("resolver  : 0x%08X\n", ret);
-        log_sync();
-        g_net_busy = 0;
-    }
+    int ret;
+    ret = sceUtilityLoadNetModule(PSP_NET_MODULE_COMMON);
+    log_file_printf("net common: 0x%08X\n", ret);
+    ret = sceUtilityLoadNetModule(PSP_NET_MODULE_INET);
+    log_file_printf("net inet  : 0x%08X\n", ret);
+    ret = sceNetInit(0x20000, 0x20, 0x1000, 0x20, 0x1000);
+    log_file_printf("sceNetInit: 0x%08X\n", ret);
+    ret = sceNetInetInit();
+    log_file_printf("inet init : 0x%08X\n", ret);
+    ret = sceNetApctlInit(0x8000, 0x30);
+    log_file_printf("apctl init: 0x%08X\n", ret);
+    ret = sceNetResolverInit();
+    log_file_printf("resolver  : 0x%08X\n", ret);
+    log_sync();
+    g_net_busy = 0;
 
     run_dashboard(targets, target_count);
 
@@ -11307,7 +11230,9 @@ int main(void)
                "fallback EST");
 
     char result[48];
-    if (g_summary.data_count > 10 && g_summary.link_losses == 0) {
+    if (g_demo) {
+        snprintf(result, sizeof(result), "SIM (sin coche)");
+    } else if (g_summary.data_count > 10 && g_summary.link_losses == 0) {
         snprintf(result, sizeof(result), "OK");
     } else if (g_summary.data_count > 10) {
         snprintf(result, sizeof(result), "OK (%d cortes)",
