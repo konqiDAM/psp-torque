@@ -41,6 +41,7 @@
 #include "obd/discovery.h"
 #include "obd/dtc.h"
 #include "obd/elm327.h"
+#include "obd/oil.h"
 #include "obd/pid.h"
 #include "obd/profile.h"
 #include "obd/samples.h"
@@ -79,7 +80,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.65 2026-11-20 hueco antes que dibujo, mascara con reintento"
+#define BUILD_TAG "fase2.67 2026-11-20 GENERAL MX5: bloque aire/aceite/agua y avance"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
@@ -692,6 +693,9 @@ enum {
     W_THR, W_LOAD, W_PLATE, W_VOLT, W_OIL, W_FUEL,
     W_STFT, W_LTFT, W_TIMING, W_O2_1, W_O2_2, W_DIST_MIL, W_BARO,
     W_GEAR,
+    /* Bloque del GENERAL de la MX-5: aire (MAF), presion de aceite
+     * calculada y agua, en una sola casilla estrecha. */
+    W_AUX,
     W_COUNT
 };
 #define W_OFF (-1)
@@ -704,7 +708,8 @@ enum { STYLE_GAUGE = 0, STYLE_BAR, STYLE_TEXT, STYLE_OFF, STYLE_COUNT };
 static const char *const g_widget_names[W_COUNT] = {
     "RPM", "VELOCIDAD", "BOOST", "ECT", "IAT", "MAP", "MAF",
     "ACELERADOR", "CARGA", "MARIPOSA", "VOLT", "ACEITE", "COMBUSTIBLE",
-    "STFT", "LTFT", "AVANCE", "O2-1", "O2-2", "MIL", "BARO", "MARCHA"
+    "STFT", "LTFT", "AVANCE", "O2-1", "O2-2", "MIL", "BARO", "MARCHA",
+    "BLOQUE"
 };
 
 /* Nombre visible de cada dato: pasa por tr() para que el dashboard siga el
@@ -786,12 +791,14 @@ static int slot_item_eff(int i)
     if (i < 0 || i >= DASH_SLOTS) {
         return W_OFF;
     }
-    if (g_layout_user) {
-        return g_slot_item[i];
-    }
-    if (g_vehicle_centre == OBD_CENTRE_MAF) {
+
+    /* Lo que el coche dice de si mismo manda sobre la vista de fabrica.
+     * En un coche sin MAP el hueco del centro pasa a ser el bloque de
+     * aire/aceite/agua, el de la temperatura el de la marcha y el del MAP
+     * el del avance. */
+    if (!g_layout_user && g_vehicle_centre == OBD_CENTRE_MAF) {
         if (i == 2) {
-            return W_MAF;
+            return W_AUX;
         }
         if (i == 3) {
             return W_GEAR;
@@ -801,7 +808,7 @@ static int slot_item_eff(int i)
              * ivan lo sigue en conduccion y la carga no le dice nada. */
             return W_TIMING;
         }
-    } else if (g_vehicle_centre == OBD_CENTRE_LOAD) {
+    } else if (!g_layout_user && g_vehicle_centre == OBD_CENTRE_LOAD) {
         if (i == 2) {
             return W_LOAD;
         }
@@ -809,7 +816,21 @@ static int slot_item_eff(int i)
             return W_MAF;
         }
     }
-    return g_slot_item[i];
+
+    /* Regla de sensor, valida con cualquier vista: en un coche sin MAP un
+     * cuadro de BOOST o de MAP no puede ensenar una lectura inventada.
+     * Antes esto solo se aplicaba a la vista de fabrica, asi que en cuanto
+     * la tarjeta guardaba la vista del coche volvia a salir el BOOST. */
+    int item = g_slot_item[i];
+    if (!g_map_supported) {
+        if (item == W_BOOST) {
+            return g_maf_supported ? W_MAF : W_OFF;
+        }
+        if (item == W_MAP) {
+            return W_TIMING;
+        }
+    }
+    return item;
 }
 
 /* El estilo acompana al hueco cuando el coche lo cambia. */
@@ -818,8 +839,13 @@ static int slot_style_eff(int i)
     if (i < 0 || i >= DASH_SLOTS) {
         return STYLE_OFF;
     }
-    if (!g_layout_user && slot_item_eff(i) != g_slot_item[i]) {
-        return (i == 2) ? STYLE_BAR : STYLE_TEXT;
+    if (slot_item_eff(i) == W_AUX) {
+        return STYLE_TEXT;
+    }
+    if (slot_item_eff(i) != g_slot_item[i]) {
+        /* Lo que el coche pone en el hueco se pinta como texto: MAF,
+         * MARCHA, AVANCE y el bloque no son barras. */
+        return STYLE_TEXT;
     }
     return g_slot_style[i];
 }
@@ -956,6 +982,34 @@ static void layout_apply_for_car(void)
                 for (int i = 0; i < TEL_SLOTS; i++) {
                     g_tel_item[i] = new_tel[i];
                     p->tel_item[i] = new_tel[i];
+                }
+            }
+        }
+        /* fase2.66: el GENERAL de la MX-5 cambia el hueco 1 (dial de
+         * velocidad estrecho) y el 2 (bloque de aire/aceite/agua). Un
+         * bloque guardado con el juego de fabrica viejo se migra; uno
+         * tocado a mano se respeta. */
+        if (g_vehicle_centre == OBD_CENTRE_MAF) {
+            static const int old_qv[DASH_SLOTS] = { W_RPM, W_SPEED, W_BOOST,
+                                                    W_ECT, W_IAT, W_MAP };
+            static const int new_qv[DASH_SLOTS] = { W_RPM, W_SPEED, W_AUX,
+                                                    W_GEAR, W_IAT, W_TIMING };
+            static const int new_st[DASH_SLOTS] = { STYLE_GAUGE,
+                                                    STYLE_GAUGE, STYLE_TEXT,
+                                                    STYLE_TEXT, STYLE_TEXT,
+                                                    STYLE_TEXT };
+            int is_old = 1;
+            for (int i = 0; i < DASH_SLOTS; i++) {
+                if (g_slot_item[i] != old_qv[i]) {
+                    is_old = 0;
+                }
+            }
+            if (is_old) {
+                for (int i = 0; i < DASH_SLOTS; i++) {
+                    g_slot_item[i] = new_qv[i];
+                    g_slot_style[i] = new_st[i];
+                    p->slot_item[i] = new_qv[i];
+                    p->slot_style[i] = new_st[i];
                 }
             }
         }
@@ -2132,6 +2186,8 @@ static void fmt_1(char *buf, size_t size, float value)
  * lo que se guarda, lo que va al log y lo que leen los maximos es la
  * medida tal cual (ver store_value). */
 static obd_smooth g_ease[256];
+static obd_smooth g_oil_ease;   /* presion de aceite calculada */
+
 
 /* Cadencia real de cada PID: con cuanto tarda de verdad en volver, no con
  * lo que promete el plan. */
@@ -2145,6 +2201,7 @@ static void disp_reset(void)
         g_seen_iv_ms[i] = 0;
         obd_smooth_reset(&g_ease[i]);
     }
+    obd_smooth_reset(&g_oil_ease);
 }
 
 /* Apunta el intervalo real entre muestras de un PID. Es lo que decide
@@ -2216,6 +2273,17 @@ static int sample_value_raw(uint8_t pid, uint32_t now, float *out)
     *out = sample->value;
     return 1;
 }
+
+/* Presion de aceite calculada: la MX-5 no tiene sensor de presion, asi
+ * que sale de las rpm y del agua con la curva del dueno. Se mueve con un
+ * retardo de ~1 s (la misma ease que la aguja) para que no parpadee al
+ * golpear el acelerador, y siempre se pinta con EST encima: es una
+ * estimacion, no una medida.
+ *
+ *   agua <= 80 C (frio): 3.5 bar al ralenti, 4.6 bar a partir de 2000 rpm
+ *   agua >= 90 C (caliente): 1.0 bar al ralenti, 4.5 bar a 5000 rpm
+ * y lineal en medio. Entre 80 y 90 C se mezclan las dos curvas para que
+ * el numero no salte 2.5 bar justo en el umbral. */
 
 /* Constante de tiempo de la aguja, en milisegundos. 0 = sin suavizado:
  * se pinta la medida tal cual llego. */
@@ -3561,6 +3629,7 @@ static uint8_t widget_pid(int item)
      * cero sin el dato del que salen. La marcha se calcula con RPM y
      * velocidad; el turbo, con el MAP (un motor sin MAP no tiene boost). */
     case W_GEAR:     return 0x0D;
+    case W_AUX:      return 0x10;   /* aire; el agua la pide el plan aparte */
     case W_BOOST:    return g_map_supported ? 0x0B : 0;
     default:         return 0;
     }
@@ -3633,9 +3702,14 @@ static void apply_screen_schedule(uint32_t now)
     memset(&forced, 0, sizeof(forced));
     if (g_mode == MODE_QV) {
         for (int i = 0; i < DASH_SLOTS; i++) {
-            uint8_t pid = widget_pid(slot_item_eff(i));
+            int item = slot_item_eff(i);
+            uint8_t pid = widget_pid(item);
             if (pid != 0) {
                 obd_forced_set_add(&forced, pid);
+            }
+            /* El bloque del GENERAL necesita el agua ademas del aire. */
+            if (item == W_AUX) {
+                obd_forced_set_add(&forced, 0x05);
             }
         }
     } else if (g_mode == MODE_TELEMETRY) {
@@ -4967,6 +5041,8 @@ typedef struct {
     char speed[16];
     int speed_valid;
     float speed_val;
+    int oilp_valid;  /* presion de aceite calculada (no hay sensor) */
+    float oilp_bar;
     float speed_raw;
 
     char boost[24];
@@ -6315,6 +6391,14 @@ static void widget_view_fill(const dash_data *d, int item, widget_view *wv)
     snprintf(wv->value, sizeof(wv->value), "N/D");
 
     switch (item) {
+    case W_AUX:
+        /* Se pinta entero en draw_aux(); aqui solo hace falta que el
+         * editor lo nombre y que no herede una unidad ajena. */
+        wv->label = "BLOQUE";
+        wv->unit = "";
+        wv->valid = 1;
+        snprintf(wv->value, sizeof(wv->value), "--");
+        break;
     case W_RPM:
         wv->label = "RPM";
         wv->unit = "rpm";
@@ -6646,10 +6730,50 @@ static void draw_widget_bar(float x, float y, float w, float h,
     }
 }
 
+/* Bloque del GENERAL de la MX-5: aire, presion de aceite calculada y
+ * agua en una casilla estrecha. Tres filas iguales. */
+static void draw_aux(const dash_data *d, float x, float y, float w, float h)
+{
+    qv_panel(x, y, w, h);
+    const float row = h / 3.0f;
+    char buf[16];
+
+    gfx_text((int)x + 8, (int)y + 4, "MAF", QV_DIM, 1);
+    gfx_text((int)x + 8, (int)y + 16,
+             d->maf_valid ? d->maf : "N/D",
+             d->maf_valid ? QV_TEXT : QV_DIM, 2);
+    gfx_text((int)x + 8, (int)y + 34, units_maf_name(), QV_DIM, 1);
+
+    float y2 = y + row;
+    gfx_text((int)x + 8, (int)y2 + 4, "ACEITE", QV_DIM, 1);
+    /* Es una estimacion y se dice: nunca se pinta como si fuera el sensor. */
+    gfx_text_right((int)(x + w) - 6, (int)y2 + 4, "EST", QV_AMBER, 1);
+    if (d->oilp_valid) {
+        fmt_1(buf, sizeof(buf), d->oilp_bar);
+    } else {
+        snprintf(buf, sizeof(buf), "N/D");
+    }
+    gfx_text((int)x + 8, (int)y2 + 16, buf,
+             d->oilp_valid ? QV_TEXT : QV_DIM, 2);
+    gfx_text((int)x + 8, (int)y2 + 34, "bar", QV_DIM, 1);
+
+    float y3 = y + row * 2.0f;
+    gfx_text((int)x + 8, (int)y3 + 4, "AGUA", QV_DIM, 1);
+    gfx_text((int)x + 8, (int)y3 + 16,
+             d->ect_valid ? d->ect : "N/D",
+             d->ect_valid ? QV_TEXT : QV_DIM, 2);
+    gfx_text((int)x + 8, (int)y3 + 34, units_temp_name(), QV_DIM, 1);
+}
+
 static void draw_dash_widget(const dash_data *d, int item, int style,
                              float x, float y, float w, float h)
 {
     if (style == STYLE_OFF || item == W_OFF) {
+        return;
+    }
+
+    if (item == W_AUX) {
+        draw_aux(d, x, y, w, h);
         return;
     }
 
@@ -6685,20 +6809,43 @@ static void draw_dash_widget(const dash_data *d, int item, int style,
     }
 }
 
+/* Geometria del GENERAL. La del coche con MAP es la de siempre: dial
+ * grande, tira ancha de velocidad y barra de boost. La del coche sin MAP
+ * (MX-5) parte el mismo hueco de la derecha en un dial de velocidad
+ * cuadrado y el bloque de aire/aceite/agua, sin mover nada mas. */
+static void qv_rect(int i, float out[4])
+{
+    static const float fx[DASH_SLOTS] = {  8.0f, 228.0f, 228.0f,
+                                           8.0f, 168.0f, 328.0f };
+    static const float fy[DASH_SLOTS] = { 32.0f,  32.0f, 104.0f,
+                                         186.0f, 186.0f, 186.0f };
+    static const float fw[DASH_SLOTS] = { 212.0f, 244.0f, 244.0f,
+                                          152.0f, 152.0f, 144.0f };
+    static const float fh[DASH_SLOTS] = { 146.0f,  64.0f,  74.0f,
+                                           80.0f,  80.0f,  80.0f };
+    /* MX-5: el mismo hueco (228..472 x 32..178) repartido en 124 + 116. */
+    static const float mx[DASH_SLOTS] = {  8.0f, 228.0f, 356.0f,
+                                           8.0f, 168.0f, 328.0f };
+    static const float my[DASH_SLOTS] = { 32.0f,  32.0f,  32.0f,
+                                         186.0f, 186.0f, 186.0f };
+    static const float mw[DASH_SLOTS] = { 212.0f, 124.0f, 116.0f,
+                                          152.0f, 152.0f, 144.0f };
+    static const float mh[DASH_SLOTS] = { 146.0f, 146.0f, 146.0f,
+                                           80.0f,  80.0f,  80.0f };
+    int maf = (g_vehicle_centre == OBD_CENTRE_MAF);
+    out[0] = maf ? mx[i] : fx[i];
+    out[1] = maf ? my[i] : fy[i];
+    out[2] = maf ? mw[i] : fw[i];
+    out[3] = maf ? mh[i] : fh[i];
+}
+
 static void draw_qv(const dash_data *d)
 {
-    static const float rx[DASH_SLOTS] = {  8.0f, 228.0f, 228.0f,
-                                           8.0f, 168.0f, 328.0f };
-    static const float ry[DASH_SLOTS] = { 32.0f,  32.0f, 104.0f,
-                                         186.0f, 186.0f, 186.0f };
-    static const float rw[DASH_SLOTS] = { 212.0f, 244.0f, 244.0f,
-                                          152.0f, 152.0f, 144.0f };
-    static const float rh[DASH_SLOTS] = { 146.0f,  64.0f,  74.0f,
-                                           80.0f,  80.0f,  80.0f };
-
     for (int i = 0; i < DASH_SLOTS; i++) {
+        float r[4];
+        qv_rect(i, r);
         draw_dash_widget(d, slot_item_eff(i), slot_style_eff(i),
-                         rx[i], ry[i], rw[i], rh[i]);
+                         r[0], r[1], r[2], r[3]);
     }
 }
 
@@ -7038,6 +7185,7 @@ static int widget_available(int item)
     case W_BOOST: return g_map_supported;
     case W_MAP:   return g_map_supported;
     case W_MAF:   return g_maf_supported;
+    case W_AUX:   return g_maf_supported;
     case W_PLATE: return g_pedal_supported;
     case W_OIL:   return g_oil_supported;
     case W_FUEL:  return g_fuel_supported;
@@ -9455,6 +9603,15 @@ static void draw_screen(uint32_t now, int requests, int data_count,
         fmt_0(d.dist_mil, sizeof(d.dist_mil), value);
         d.dist_mil_valid = 1;
         d.dist_mil_val = value;
+    }
+
+    /* Presion de aceite: calculada con la curva, con ~1 s de retardo. */
+    if (d.rpm_valid) {
+        float target = obd_oil_bar(d.rpm_raw, d.ect_val, d.ect_valid);
+        d.oilp_bar = obd_ease_apply(&g_oil_ease, target, now, 1000.0f);
+        d.oilp_valid = 1;
+    } else {
+        obd_smooth_reset(&g_oil_ease);
     }
 
     if (g_boost.boost_valid) {
