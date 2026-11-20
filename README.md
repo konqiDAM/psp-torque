@@ -173,7 +173,7 @@ salir. Si se quedó en una herramienta, abre GENERAL.
 `START` abre el menú: `TEMA`, `COLOR`, `IDIOMA` (auto/español/inglés),
 `CONTRASTE`, `ANIMACION`, `MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`,
 `RPM MAX`, `UNIDADES` (métrico/imperial), `TURBO AUTO`, `BOOST MAX`, `HUECO ELM`,
-`PANTALLA INICIAL`, `DEBUG`, `LOG COMPLETO`, `AGUJA`, `REPARTO` y `SALIR`.
+`PANTALLA INICIAL`, `DEBUG`, `LOG`, `MODO SHOW`, `AGUJA`, `REPARTO` y `SALIR`.
 
 `AGUJA` elige cuánto se suavizan las agujas del tacómetro y del velocímetro
 (`DIRECTA`, `SUAVE` de 150 ms o `MUY SUAVE` de 400 ms); los números y las barras
@@ -181,6 +181,21 @@ van siempre con la medida tal cual. `REPARTO` (0 a 4) decide cuántos valores de
 la pantalla entran en el reparto rápido del enlace: más bajo, aguja más rápida.
 En un coche de CAN el reparto no se usa (la tabla base cabe entera), así que
 `REPARTO` no cambia nada en el MiTo.
+
+`LOG` decide qué se escribe en la tarjeta: `NO` no abre archivo, `SESION`
+guarda el arranque, las líneas de estado y el resumen final, y `COMPLETO` (lo
+que viene de fábrica) guarda además cada petición y cada respuesta. Si el
+archivo está apagado a propósito no sale el aviso `SIN LOG`: apagarlo es una
+decisión, no un fallo.
+
+`MODO SHOW` arranca el cuadro sin red y sin adaptador: entra en el modo demo,
+cambia de pantalla cada 12 s y de tema cada 30 s, y no escribe ni el log ni los
+ajustes. Una pulsación cualquiera deja el cuadro quieto un minuto y luego sigue
+girando. `SELECT` y `START` mantenidos dos segundos cierran la app y devuelven
+el arranque normal a la tarjeta; los gatillos, `TRIANGLE` y `SQUARE` no hacen
+nada en ese modo, para que nadie en una feria deje el cuadro en un menú o
+pidiendo datos. Se enciende en el menú de ajustes y se aplica al siguiente
+encendido.
 
 Se guardan en `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` y se aplican al
 instante.

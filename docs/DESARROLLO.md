@@ -123,9 +123,22 @@ app creates itself. Nothing else needs copying.
 
 After copying, press `O` on the console to leave USB mode before unplugging.
 
-`LOG COMPLETO` in the settings menu (on by default, `log_full=` in `settings.txt`) writes
-every command and reply, so a session can be reconstructed later. At the K-line car's
-1.9 req/s that is about 9 KB per minute, which a Memory Stick does not notice.
+`LOG` in the settings menu has three positions (`log=` in `settings.txt`):
+
+| valor | qué escribe | cuándo |
+|---|---|---|
+| 0 | nada: no se abre archivo | feria o un viaje del que no hace falta reconstruir nada |
+| 1 | arranque, líneas de estado cada 2 s, resumen final | lo mínimo para saber cómo fue la sesión |
+| 2 (por defecto) | además cada comando y cada respuesta | reconstruir una sesión, como hasta ahora |
+
+Con `log=2`, a los 1,9 req/s del coche de K-line eso son unos 9 KB por minuto, que una
+Memory Stick no nota. Con `log_full=` en un archivo antiguo se lee como `log=2`, y
+`log_full=0` como `log=1`, así que una tarjeta de antes sigue funcionando sin tocar nada.
+
+`MODO SHOW` (`show=`, apagado de fábrica) es el modo feria: arranca en demo sin cargar
+los módulos de red ni esperar al adaptador, rota pantalla cada 12 s y tema cada 30 s, no
+abre el log y no guarda ajustes. Al salir con `SELECT+START` mantenidos se escribe
+`show=0`, así que el siguiente encendido vuelve a ser normal.
 
 The end of every session carries a `=== RESUMEN ===` block with the detected car, the
 measured link capacity and plan, the fault-code state and the session counters. Read that

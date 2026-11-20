@@ -526,3 +526,38 @@ Esto es clave para distinguir “el coche no lo soporta” de “la app lo pide 
 - Conexión simultánea con Torque/AlfaOBD (el ELM327 WiFi suele admitir un
   cliente; además la ECU no multiplexa bien dos maestros de diagnóstico).
 - Bluetooth o USB: la PSP no los soporta de forma práctica para este uso.
+
+## 12. Modo escaparate y control del log (fase2.68)
+
+Dos cosas que no tocan el camino de conduccion: con `show=0` y `log=2` (los
+valores de fabrica) el codigo ejecuta exactamente lo de antes, y cada rama nueva
+prueba uno de esos dos ajustes.
+
+**`show=`** (menu `MODO SHOW`) es el modo feria. Al arrancar:
+
+- `settings_load()` corre antes de `log_open()`, porque el ajuste LOG decide si
+  hay archivo que abrir. Las lineas que la carga deja anotadas se vuelcan en
+  `settings_log_summary()` en cuanto el archivo existe.
+- Con `show=1` se enciende el demo (`demo_toggle()`, el mismo generador del
+  acorde L+R) antes del cuadro, se saltan los modulos de red y
+  `connect_network_and_elm()` no se llama nunca: ni WiFi, ni handshake, ni una
+  peticion al coche. La pantalla inicial es siempre GENERAL.
+- Dentro del bucle, cada 12 s se avanza de pantalla con `mode_step()` (las
+  cuatro de conduccion, las mismas de L/R) y cada 30 s de tema con
+  `show_next_theme()` (se saltan los temas 1-4, que son colores del NORMAL, y
+  NOTHING, que no tiene nada que ensenar). Una pulsacion deja el cuadro quieto
+  60 s.
+- El mando queda aislado: `pressed` se enmascara a pad y gatillos, asi que
+  START (menu), SELECT (selector y editor de series), `TRIANGLE`/`SQUARE`
+  (reconectar y WiFi) y `CROSS` (editores y lecturas) no llegan a ninguna
+  parte. `SELECT+START` mantenidos dos segundos cierran la app.
+- La rotacion cambia `g_cfg.theme`, pero se guarda `g_save_theme`: lo que se
+  escribe en la tarjeta es el tema elegido por el dueno, no el que tocaba en el
+  momento de salir. Al salir se escribe `show=0`, de modo que el escaparate
+  dura una sesion y el siguiente encendido vuelve a ser normal.
+
+**`log=`** tiene tres posiciones: 0 no abre archivo (y por eso no sale el aviso
+`SIN LOG`: apagarlo es una decision), 1 guarda arranque, estado y resumen, y 2
+guarda ademas cada comando y cada respuesta, que es lo que hacia `log_full=1`.
+La clave vieja se sigue leyendo: `log_full=1` pasa a `log=2` y `log_full=0` a
+`log=1`.

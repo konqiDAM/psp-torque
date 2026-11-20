@@ -171,7 +171,7 @@ If it was left on a tool screen it opens GENERAL instead.
 `START` opens the menu: `TEMA`, `COLOR`, `IDIOMA` (auto/Spanish/English),
 `CONTRASTE`, `ANIMACION`, `MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`,
 `RPM MAX`, `UNIDADES` (metric/imperial), `TURBO AUTO`, `BOOST MAX`, `HUECO ELM`,
-`PANTALLA INICIAL`, `DEBUG`, `LOG COMPLETO`, `AGUJA`, `REPARTO` and `SALIR`.
+`PANTALLA INICIAL`, `DEBUG`, `LOG`, `MODO SHOW`, `AGUJA`, `REPARTO` and `SALIR`.
 
 `AGUJA` picks how much the tachometer and speedometer needles are eased
 (`DIRECT`, `SOFT` at 150 ms or `VERY SOFT` at 400 ms); numbers and bars always
@@ -179,6 +179,21 @@ show the measurement as it arrives. `REPARTO` (0 to 4) decides how many
 on-screen values share the fast part of the link: lower means a faster needle.
 On a CAN car the split is not used (the base table fits whole), so `REPARTO`
 changes nothing on the MiTo.
+
+`LOG` decides what reaches the card: `NO` opens no file at all, `SESION` keeps
+the boot lines, the status lines and the final summary, and `COMPLETO` (the
+factory value) also keeps every command and every reply. With logging switched
+off on purpose the `SIN LOG` warning does not appear: turning it off is a
+decision, not a failure.
+
+`MODO SHOW` boots the dashboard with no network and no adapter: it enters demo
+mode, changes screen every 12 s and theme every 30 s, and writes neither the
+log nor the settings. Any button press holds the dashboard still for a minute
+and then it keeps turning. `SELECT` and `START` held for two seconds exit the
+app and put a normal boot back on the card; the triggers, `TRIANGLE` and
+`SQUARE` do nothing in that mode, so nobody at a show can leave the dashboard
+in a menu or asking for data. It is switched on in the settings menu and takes
+effect on the next power-on.
 
 They are stored in `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` and applied
 immediately.

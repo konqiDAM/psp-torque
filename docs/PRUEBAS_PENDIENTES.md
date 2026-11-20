@@ -178,3 +178,24 @@ more and only the two needles are eased, so every number on screen is a decoded 
 without going through the menu.
 
 **Done when:** that session's log exists and reaches the last second.
+
+### T20 — Show mode on the real PSP, and the card afterwards
+
+**What we want to know:** that the feria mode behaves on the console as it does
+in the emulator, and that it leaves the card as it found it.
+
+**How:** switch `MODO SHOW` to `SI` in the settings menu, power the PSP off and
+on with no adapter in range. Then, once, hold `SELECT+START` for two seconds to
+leave the app.
+
+**What to look for:** the dashboard with data in about two seconds and no
+`SIN WIFI`/`SIN ADAPTADOR` wait; the screen changing every 12 s and the palette
+every 30 s; the settings menu, the screen picker and `TRIANGLE`/`SQUARE` doing
+nothing while a visitor presses them; the rotation pausing for a minute after
+any press; and `show=0` in `settings.txt` after the exit, so the next power-on
+is a normal one (adapter, WiFi, log as configured).
+
+**Done when:** he has run it on the console at the show and the card was back to
+`show=0` afterwards; on the emulator this is already covered by the plan
+`docs/superpowers/plans/2026-11-20-modo-show.md`, including the
+`sha256` of `settings.txt` before and after.
