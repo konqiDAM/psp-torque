@@ -336,6 +336,11 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
   extrapolan por delante de la última lectura ni se inventan un valor. Los
   números, las barras y la gráfica van siempre con la medida tal cual.
   `AGUJA` en el menú elige `DIRECTA`, `SUAVE` (150 ms) o `MUY SUAVE` (400 ms).
+- **Panel adaptado al coche:** en la MX-5, que no tiene MAP, el GENERAL
+  cambia el hueco del centro por un bloque con el aire (MAF), la presión de
+  aceite **calculada** (marcada `EST`: ese coche no lleva sensor) y el agua; y
+  el hueco del MAP pasa a ser el avance. Las sustituciones valen también con
+  la vista guardada del coche.
 - **Reparto del enlace (`REPARTO`):** cuántos valores de pantalla entran en el
   reparto rápido, de 0 a 4. Cada valor visible reserva su suelo y el RPM se lleva
   el resto, así que con `REPARTO` bajo la aguja va más rápida; los valores que se

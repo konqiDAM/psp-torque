@@ -317,6 +317,52 @@ Lo que no cambió:
   cual llegó** (`store_value()` ya no filtra): la evidencia y los máximos no
   pueden ser la animación.
 
+### 5.5c El GENERAL de la MX-5: lo que pinta y lo que calcula (fase2.67)
+
+El GENERAL es la misma rejilla para todos los coches, pero un coche sin MAP
+sensor no puede enseñar el centro del cuadro de un turbo. Las sustituciones
+las decide el perfil (`slot_item_eff`), y desde `fase2.67` **también se
+aplican con una vista guardada**, no solo con la de fábrica: antes, en cuanto
+la tarjeta guardaba la vista del coche, volvía a salir un BOOST alimentado por
+el estimador.
+
+Con la MX-5 la rejilla queda así (las posiciones no cambian; solo el bloque
+de la derecha):
+
+| Hueco | Coche con MAP | MX-5 |
+|---|---|---|
+| 0, 212×146 | RPM | RPM |
+| 1, 244×64 | VELOCIDAD (tira ancha) | VELOCIDAD, dial en 124×146 |
+| 2, 244×74 | BOOST (barra) | bloque AIRE / ACEITE / AGUA en 116×146 |
+| 3, 152×80 | ECT | MARCHA |
+| 4, 152×80 | IAT | IAT |
+| 5, 144×80 | MAP | AVANCE |
+
+El bloque (`W_AUX`) pinta tres filas iguales: MAF en g/s, la presión de aceite
+calculada y el agua. Necesita dos PID (0x10 y 0x05) y el plan los pide cuando
+el bloque está en pantalla, aunque el hueco solo declare uno.
+
+**La presión de aceite no existe como sensor** en el NB2: el cuadro de fábrica
+lleva un manómetro que la ECU mueve por revoluciones. Aquí se replica con una
+curva (`obd_oil_bar()`, en `src/core/oil.c`) y se marca `EST` al lado del
+número:
+
+| | ralentí | 2000 rpm | 5000 rpm |
+|---|---|---|---|
+| agua ≤ 80 °C (frío) | 3,5 bar | 4,6 bar | 4,6 bar |
+| agua ≥ 90 °C (caliente) | 1,0 bar | ~2,0 bar | 4,5 bar |
+
+Lineal en medio, y entre 80 y 90 °C se mezclan las dos curvas: si no, el número
+saltaría 2,5 bar justo en el umbral del termostato. Se mueve con un retardo de
+un segundo (la misma ease que la aguja) para que no parpadee al golpear el
+acelerador. Sin lectura de agua se usa la curva fría, que es la que no puede
+hacer pensar que el motor está mejor de lo que está.
+
+Un bloque `v.<coche>` guardado con la rejilla vieja se migra en
+`layout_apply_for_car()` con la misma regla exacta que ya se usaba para las
+series de TELEMETRÍA: solo si el juego es *exactamente* el de fábrica viejo, y
+sin tocar una vista que el dueño haya cambiado.
+
 ### 5.6 Reparto del ancho de banda por pantalla (FASE F3)
 
 El enlace da ~12-14 peticiones/s, el planificador tiene 19 PID y **no todos

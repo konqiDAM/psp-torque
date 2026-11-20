@@ -84,6 +84,23 @@ goes in.
 **Done when:** same PIDs as before, `BOOST` with the right sign, no `STOPPED`, and the
 per-screen bandwidth split working.
 
+### T19 — The calculated oil pressure reads like a real gauge
+
+**What we want to know:** whether the EST oil pressure behaves like the gauge it
+imitates, even though it is arithmetic and not a sender.
+
+**How:** cold start: the reading must sit at 3.5 bar at idle and rise to 4.6 by
+2000 rpm, and it must move about a second after the revs do. Then once the coolant
+is past 90 °C: 1.0 bar at idle and 4.5 bar at 5000 rpm, with the middle values in
+between.
+
+**What to look for:** `t=` lines in the log give rpm and ect every 2 s, so the
+reading can be checked against the curve afterwards. The number must never be
+offered as a measurement: the tile says `EST` next to it.
+
+**Done when:** he says it reads plausibly against a real oil gauge, or the curve
+needs different numbers. Nothing here can be closed by a log alone.
+
 ### T16 — AGUJA: direct, soft, very soft
 
 **What we want to know:** which ease he actually likes on the MX-5 needle, or whether

@@ -332,6 +332,11 @@ powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
   extrapolate past the last reading or invent a value. Numbers, bars and the
   graph always show the measurement as it arrives. `NEEDLE` in the menu
   picks `DIRECT`, `SOFT` (150 ms) or `VERY SOFT` (400 ms).
+- **Panel that follows the car:** on the MX-5, which has no MAP sensor, the
+  GENERAL screen replaces the centre tile with a block holding airflow (MAF),
+  the **calculated** oil pressure (marked `EST`: that car has no sender) and
+  coolant; the MAP tile becomes timing advance. The substitutions hold even
+  with the car's own saved layout.
 - **Link split (`SPLIT`):** how many on-screen values share the fast part of the
   link, from 0 to 4. Every visible value reserves its own floor and the rpm takes
   the rest, so a lower `SPLIT` gives a faster needle; values that are drawn but do
