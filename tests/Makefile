@@ -7,11 +7,11 @@ SRC = test_main.c test_parser.c test_pid.c test_boost.c \
       test_forced_set.c \
       test_vehicle.c \
       test_dtc.c \
-      test_plan.c \
+      test_plan.c test_oil.c \
       test_splash_mx5.c \
       ../src/core/elm327.c ../src/core/pid.c ../src/core/boost.c \
       ../src/core/scheduler.c ../src/core/samples.c ../src/core/profile.c \
-      ../src/core/discovery.c ../src/core/smooth.c  \
+      ../src/core/discovery.c ../src/core/smooth.c ../src/core/oil.c  \
       ../src/core/vehicle.c ../src/core/dtc.c \
       ../src/psp/splash_mx5.c
 

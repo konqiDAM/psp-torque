@@ -14,6 +14,7 @@ void test_discovery(void);
 void test_smooth(void);
 void test_set_period(void);
 void test_sched_defer(void);
+void test_oil(void);
 void test_forced_set(void);
 void test_vehicle(void);
 void test_scheduler_strict(void);
@@ -144,6 +145,7 @@ int main(void)
     test_smooth();
     test_set_period();
     test_sched_defer();
+    test_oil();
     test_forced_set();
     test_vehicle();
     test_plan();
