@@ -6,10 +6,10 @@ Lee datos reales del coche a través de un adaptador **ELM327 WiFi** y los
 representa en un dashboard gráfico de 480×272 con temas de vídeo, medidores
 de turbo, telemetría y diagnóstico.
 
-Desarrollado y validado sobre un **Alfa Romeo MiTo Quadrifoglio Verde 2010**
-(1.4 Turbo MultiAir, 170 CV) con PSP‑2000/3000 y CFW ARK4, pero el núcleo es
-**universal**: usa solo OBD‑II estándar (SAE J1979) y se adapta a las
-capacidades reales de cualquier ECU.
+Desarrollado y validado sobre un **Mazda MX‑5 NB2 1.8** y un **Alfa Romeo MiTo
+Quadrifoglio Verde 2010** (1.4 Turbo MultiAir, 170 CV) con PSP‑2000/3000 y CFW
+ARK4, pero el núcleo es **universal**: usa solo OBD‑II estándar (SAE J1979) y se
+adapta a las capacidades reales de cualquier ECU.
 
 ```
 ┌──────────────────────── PSP 480×272 ────────────────────────┐
@@ -37,10 +37,14 @@ capacidades reales de cualquier ECU.
   o, en último caso, de un valor estimado marcado como `EST`.
 - **Modo universal sin PIDs de fabricante.** No usa modo 22 ni DIDs propietarios:
   no son universales y no se inventan.
-- **7 pantallas:** `GENERAL`, `MOTOR`, `DIAG`, `TELEM`, `MODULOS`, `SNIFFER`,
-  `INFO`.
+- **9 pantallas:** `GENERAL`, `MOTOR`, `DIAG` y `TELEM` para conducir, más
+  `FALLOS`, `MODULOS`, `SNIFFER`, `INFO` y `SONDA` como herramientas.
 - **10 temas**, y los de juego cambian la estructura del reloj, la aguja y los
   indicadores, no solo los colores.
+- **Escala, zona roja y corte de cada coche** según su perfil, con luz de cambio
+  en `SHIFT RPM`.
+- **Presión de aceite calculada** (`EST`) en los coches que no llevan sensor,
+  como el MX‑5.
 - **Panel de telemetría** con 5 series simultáneas, colores sin colisiones y
   máximo/mínimo por serie.
 - **Dashboard editable:** cada hueco puede ser `RELOJ`, `BARRA`, `TEXTO` u
@@ -188,10 +192,8 @@ que viene de fábrica) guarda además cada petición y cada respuesta. Si el
 archivo está apagado a propósito no sale el aviso `SIN LOG`: apagarlo es una
 decisión, no un fallo.
 
-Si el arranque no encuentra ningún adaptador, el cuadro no se queda en `N/D`:
-entra solo en el modo demo del MX-5. La cabecera lleva el chip `DEMO`, y en
-cuanto `TRIANGLE` conecte con el coche de verdad el demo se apaga y manda la
-medida.
+El modo demo no arranca solo: se enciende con `L`+`R` (ver [Modo
+demo](#modo-demo)). Con el adaptador conectado, la medida real manda siempre.
 
 Se guardan en `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` y se aplican al
 instante.
@@ -416,6 +418,34 @@ Estas reglas son la razón de ser del proyecto y no se negocian:
   intentos. Si el adaptador no vuelve, hay que reintentar a mano con
   `TRIANGLE`.
 - El HUD está diseñado para 480×272 y no se adapta a otras resoluciones.
+
+## Novedades
+
+Lo último, para quien venga de una versión anterior:
+
+- **Agujas sin predicción.** El tacómetro y el velocímetro se acercan a la última
+  medida y ahí se quedan: nada en pantalla se adelanta al coche. `AGUJA` elige
+  `DIRECTA`, `SUAVE` (150 ms) o `MUY SUAVE` (400 ms); `REPARTO` (0 a 4) decide
+  cuántos valores entran en el cupo rápido del enlace, y el plan reparte el
+  presupuesto sin pasarse nunca (un test del núcleo lo comprueba).
+- **Escala, zona roja y corte por coche.** Cada perfil trae los suyos (MX-5:
+  8.000 de fondo, zona roja en 7.000, corte en 7.200) y `SHIFT RPM` fija la luz
+  de cambio. Un ajuste manual del tacómetro manda sobre el perfil.
+- **El GENERAL de un coche sin MAP.** El centro pasa a ser un bloque con el aire
+  (MAF, g/s), la presión de aceite **calculada** (`EST`: ese coche no lleva
+  sensor) y el agua; el velocímetro se queda en un dial estrecho y el MAP se
+  sustituye por la MARCHA y el AVANCE. Una tarjeta con la vista vieja migra
+  sola; una vista editada a mano se respeta.
+- **Presión de aceite calculada.** Con rpm y temperatura del agua, con curva de
+  frío y de caliente y marcada siempre `EST`.
+- **Demo del MX-5** de 90 s: ralenti, salida en primera, estirada completa en
+  segunda y crucero, con las relaciones reales del coche (ver [Modo
+  demo](#modo-demo)).
+- **Log de tres estados** (`NO`, `SESION`, `COMPLETO`) que se aplica en el acto,
+  y aviso `SIN LOG` solo cuando de verdad falla la escritura.
+- **Enlace K-line más estable:** el hueco del ELM327 manda sobre el dibujado, la
+  máscara `0100` se reintenta dos veces por su cuenta y una petición fuera de
+  pantalla recibe su primer turno dentro de su periodo.
 
 ## Documentación
 

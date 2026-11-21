@@ -6,10 +6,10 @@ Reads real data from your car through a **WiFi ELM327 adapter** and renders it
 on a 480×272 graphical dashboard with video-game themes, boost gauges,
 telemetry charts and diagnostics.
 
-Developed and validated on an **Alfa Romeo MiTo Quadrifoglio Verde 2010**
-(1.4 Turbo MultiAir, 170 hp) with a PSP‑2000/3000 running ARK4 CFW, but the
-core is **universal**: it only uses standard OBD‑II (SAE J1979) and adapts to
-whatever your ECU actually supports.
+Developed and validated on a **Mazda MX‑5 NB2 1.8** and an **Alfa Romeo MiTo
+Quadrifoglio Verde 2010** (1.4 Turbo MultiAir, 170 hp) with a PSP‑2000/3000 on
+CFW ARK4, but the core is **universal**: it only uses standard OBD‑II (SAE
+J1979) and adapts to whatever your ECU actually supports.
 
 ```
 ┌──────────────────────── PSP 480×272 ────────────────────────┐
@@ -37,10 +37,13 @@ whatever your ECU actually supports.
   or, as a last resort, from an estimate explicitly marked as `EST`.
 - **Universal mode without manufacturer PIDs.** It does not use mode 22 or
   proprietary DIDs: they are not universal and they are never invented.
-- **7 screens:** `GENERAL`, `MOTOR`, `DIAG`, `TELEM`, `MODULOS`, `SNIFFER`,
-  `INFO`.
-- **10 themes.** The game themes change the structure of the gauge, the needle
-  and the indicators — not just the colours.
+- **9 screens:** `GENERAL`, `MOTOR`, `DIAG` and `TELEM` for driving, plus
+  `FALLOS`, `MODULOS`, `SNIFFER`, `INFO` and `SONDA` as tools.
+- **10 themes**, and the game ones change the structure of the dial, the needle
+  and the indicators, not just the colours.
+- **Scale, red zone and cut per car**, from its profile, with a shift light at
+  `SHIFT RPM`.
+- **Calculated oil pressure** (`EST`) on cars without a sensor, like the MX‑5.
 - **Telemetry panel** with 5 simultaneous series, collision-free colours and
   a max/min per series.
 - **Editable dashboard:** every slot can be `RELOJ` (gauge), `BARRA` (bar),
@@ -186,10 +189,9 @@ factory value) also keeps every command and every reply. With logging switched
 off on purpose the `SIN LOG` warning does not appear: turning it off is a
 decision, not a failure.
 
-If the boot finds no adapter at all, the dashboard does not sit on `N/D`: it
-starts the MX-5 demo by itself. The header carries the `DEMO` chip, and as soon
-as `TRIANGLE` reaches the real car the demo goes off and the measurement takes
-over.
+The demo never starts by itself: `L`+`R` turns it on (see [Demo
+mode](#demo-mode)). With the adapter connected the real measurement always
+wins.
 
 They are stored in `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` and applied
 immediately.
@@ -408,6 +410,33 @@ These rules are the reason the project exists and they are not negotiable:
 - Automatic reconnection retries up to 3 times with 2 s between attempts. If
   the adapter does not come back, reconnect manually with `TRIANGLE`.
 - The HUD is designed for 480×272 and does not adapt to other resolutions.
+
+## What's new
+
+The latest, for anyone coming from an older build:
+
+- **Needles without prediction.** The tachometer and the speedometer approach the
+  last measurement and stay there: nothing on screen runs ahead of the car.
+  `AGUJA` picks `DIRECT`, `SOFT` (150 ms) or `VERY SOFT` (400 ms); `REPARTO` (0
+  to 4) decides how many values get into the fast quota of the link, and the plan
+  never oversubscribes it (a core test checks that).
+- **Scale, red zone and cut per car.** Every profile carries its own (MX-5: 8,000
+  scale, red zone at 7,000, cut at 7,200) and `SHIFT RPM` sets the shift light. A
+  manual tachometer adjustment wins over the profile.
+- **GENERAL on a car without MAP.** The centre becomes a block with airflow
+  (MAF, g/s), the **calculated** oil pressure (`EST`: that car has no sensor) and
+  coolant; the speedometer narrows to a dial and MAP gives way to GEAR and
+  TIMING. A card with the old view migrates by itself; a view edited by hand is
+  respected.
+- **Calculated oil pressure.** From revs and coolant temperature, with a cold and
+  a hot curve, always marked `EST`.
+- **MX-5 demo** of 90 s: idle, a launch in first, a full pull in second and a
+  cruise, with the car's real ratios (see [Demo mode](#demo-mode)).
+- **Three-state log** (`NO`, `SESION`, `COMPLETO`) that applies on the spot, and
+  the `SIN LOG` warning only when a write really fails.
+- **More stable K-line link:** the ELM327 gap takes priority over drawing, the
+  `0100` mask is retried twice on its own, and an off-screen PID gets its first
+  turn inside its period.
 
 ## Documentation
 
