@@ -373,7 +373,7 @@ static int g_link_connected = 0;
  * "error" en el parser, antes la app martilleaba al adaptador sin
  * llegar nunca a la reconexion. */
 #define ELM_STUCK_MIN 3      /* para mostrar "ELM ATASCADO" */
-#define ELM_STUCK_RECOVER 8  /* para escalar a reconexion */
+#define ELM_STUCK_RECOVER 8  /* paradas dentro de una ventana de 12 peticiones */
 
 /* Una racha de NO DATA es otra cosa: el adaptador esta vivo y contesta,
  * pero la centralita se ha callado. Los bytes llegan, asi que el contador
@@ -384,6 +384,7 @@ static int g_link_connected = 0;
 #define ELM_NO_DATA_RECOVER 20
 
 static int g_elm_stuck = 0;
+static int g_elm_window = 0;   /* peticiones desde la ultima poda */
 static int g_no_data_streak = 0;
 
 /* SELECT durante una conexion en curso la cancela (FASE D3). */
@@ -10755,8 +10756,13 @@ static void run_dashboard(Target *targets, int target_count)
             uint32_t t1 = now_ms();
 
             /* FASE F1: se ancla el hueco en el instante en que la
-             * respuesta se completo. */
-            g_last_resp_ms = t1;
+             * respuesta se completo, salvo que sea un STOPPED: ahi el
+             * ELM327 no proceso el comando, y contar el hueco desde esa
+             * respuesta hace esperar de mas al siguiente.
+             * Portado del autor original (fase2.45). */
+            if (!reply->stopped) {
+                g_last_resp_ms = t1;
+            }
 
             last_rtt = (int)(t1 - rx_t0);
             requests++;
@@ -10781,12 +10787,21 @@ static void run_dashboard(Target *targets, int target_count)
                 consecutive_errors = 0;
             }
 
-            /* FASE F2: contador de STOPPED seguidos. El ELM327 se puede
-             * quedar pegado en ese estado y no sale ni con reintentos. */
+            /* FASE F2: STOPPED contados en ventana deslizante de 12
+             * peticiones. El ELM327 se queda pegado en STOPPED y no sale
+             * ni con reintentos; con un contador de seguidos, los STOPPED
+             * intercalados con respuestas buenas no llegaban nunca a 8 y
+             * la reconexion no se disparaba. Portado de fase2.45. */
+            if (++g_elm_window >= 12) {
+                g_elm_window = 0;
+                if (g_elm_stuck > 0) {
+                    g_elm_stuck--;
+                }
+            }
             if (reply->stopped) {
                 g_elm_stuck++;
-            } else {
-                g_elm_stuck = 0;
+            } else if (g_elm_stuck > 0) {
+                g_elm_stuck--;
             }
 
             if (reply->no_data || reply->unable) {
@@ -10849,6 +10864,11 @@ static void run_dashboard(Target *targets, int target_count)
                     consecutive_timeouts = 0;
                     consecutive_errors = 0;
                     g_elm_stuck = 0;
+                    g_elm_window = 0;
+                    /* Sin esto, el primer comando tras el corte mediria un
+                     * hueco enorme contra la ultima respuesta del enlace
+                     * que acaba de morir (fase2.45). */
+                    g_last_resp_ms = 0;
                     g_no_data_streak = 0;
 
                     /* D3: en lugar de bloquear 2 s y reconectar en el
