@@ -474,6 +474,7 @@ static void draw_modules(void);
 static void build_scheduler(void);
 static void apply_screen_schedule(uint32_t now);
 static void demo_apply_flags(int on);
+static void demo_apply_car(int on);
 static float clamp_float(float v, float lo, float hi);
 
 /* Ajustes de tema persistidos en settings.txt. */
@@ -2719,16 +2720,48 @@ static void demo_apply_flags(int on)
     }
 }
 
+/* El demo viste el coche: perfil del MX-5 (tacometro 8000, zona roja 7000,
+ * corte 7200), centro de MAF y su vista, que es donde estan el bloque de
+ * aire/aceite/agua, la marcha y el avance. Se aplica UNA vez al entrar y al
+ * salir del demo, nunca desde settings_apply(): hacerlo en cada cambio de
+ * ajuste era lo unico nuevo en ese camino cuando la consola se quedo
+ * colgada, y no hay razon para tocar el perfil mientras se edita un ajuste. */
+static void demo_apply_car(int on)
+{
+    const obd_vehicle_profile *p = obd_vehicle_by_id("MAZDA_MX5_NB2");
+
+    if (p == NULL) {
+        return;
+    }
+    if (on) {
+        g_profile_tach = p->rpm_max;
+        g_profile_redline = p->redline;
+        g_profile_cut = p->fuel_cut;
+        g_vehicle_centre = p->centre;
+        snprintf(g_vehicle_id, sizeof(g_vehicle_id), "%s", p->id);
+        snprintf(g_vehicle_name, sizeof(g_vehicle_name), "%s", p->name);
+        log_file_printf("Demo: perfil %s, vista del coche\n", p->name);
+    } else {
+        vehicle_release_tacho();
+        g_vehicle_centre = OBD_CENTRE_FROM_CAPS;
+        g_vehicle_id[0] = '\0';
+        g_vehicle_name[0] = '\0';
+    }
+    layout_apply_for_car();
+}
+
 static void demo_toggle(void)
 {
     g_demo = !g_demo;
 
     if (g_demo) {
+        demo_apply_car(1);
         demo_apply_flags(1);
         demo_reset();
         log_file_printf("MODO DEMO activado (datos SIM)\n");
     } else {
         demo_apply_flags(0);
+        demo_apply_car(0);
         obd_store_init(&g_store);
         boost_init(&g_boost, PROFILE_BARO_FALLBACK_KPA);
         if (g_link_connected) {
