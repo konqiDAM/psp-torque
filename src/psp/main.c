@@ -37,6 +37,7 @@
 #include <math.h>
 #include <time.h>
 
+#include "obd/alert.h"
 #include "obd/boost.h"
 #include "obd/discovery.h"
 #include "obd/dtc.h"
@@ -6061,7 +6062,10 @@ static void qv_tile(float x, float y, float w, float h,
     }
 }
 
-static void draw_top_bar(int connected, int stale, uint32_t age_ms)
+static void draw_top_bar(int connected, int stale, uint32_t age_ms,
+                         float ect, int ect_valid,
+                         float iat, int iat_valid,
+                         float volt, int volt_valid)
 {
     /* La cabecera no se atenua: es donde vive el aviso de que el dato
      * esta viejo, asi que tiene que seguir leyendose siempre. */
@@ -6147,8 +6151,25 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms)
                  (unsigned)(session_s % 60u));
     }
 
+    /* Aviso global del autor original (fase2.12): refrigerante por encima
+     * de 105/115 C, admision por encima de 70 C o bateria por debajo de
+     * 11,5 V. Se dibuja EN LUGAR del estado y el reloj, en el bloque
+     * derecho, donde hay hueco: a x=16 tapaba las pestañas. */
+    obd_alert al = obd_alert_eval(ect, ect_valid, iat, iat_valid,
+                                  volt, volt_valid);
     char righttop[40];
+    uint32_t right_color = state_color;
+
     snprintf(righttop, sizeof(righttop), "%s  %s", state, tb);
+
+    if (al.level != OBD_ALERT_NONE &&
+        ((now_ms() / 500u) & 1u) == 0u) {
+        /* Medio segundo visible, medio oculto: la cabecera se repinta
+         * entera cada frame, asi que no queda pintura vieja. */
+        snprintf(righttop, sizeof(righttop), "! %s%s",
+                 obd_alert_text(al.kind), al.more ? " +1" : "");
+        right_color = (al.level == OBD_ALERT_CRIT) ? QV_CRIT : QV_AMBER;
+    }
     int right_x = GFX_W - 8 - gfx_text_width(righttop, 1);
     /* Con la octava pestana la cabecera va justa: si el estado largo
      * chocaria con las pestanas, se deja solo el reloj. */
@@ -6157,7 +6178,7 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms)
         right_x = GFX_W - 8 - gfx_text_width(righttop, 1);
     }
     gfx_circle((float)(right_x - 9), 12.0f, 4.0f, dot);
-    gfx_text(right_x, 8, righttop, state_color, 1);
+    gfx_text(right_x, 8, righttop, right_color, 1);
 
     /* Lampara de averia: si se han leido los codigos y esta encendida se ve
      * aqui, sin tener que entrar en FALLOS. Un N/D no es un aviso. */
@@ -9777,7 +9798,10 @@ static void draw_screen(uint32_t now, int requests, int data_count,
     /* FASE F2: si el dato envejece, el contenido se apaga (el marco se
      * queda). El panel deja de parecer congelado y empieza a explicar
      * que lo que hay dentro ya no es de ahora. */
-    g_gfx_dim = (age_ms >= data_old_ms()) ? 55 : 100;
+    /* FASE 2.12 del autor original: mientras se reintenta la conexion el
+     * contenido tambien se atenua, para que se vea que lo de dentro no es
+     * de ahora aunque el marco siga vivo. */
+    g_gfx_dim = (g_net_busy || age_ms >= data_old_ms()) ? 55 : 100;
 
     theme_effects_update(now);
 
@@ -9821,7 +9845,10 @@ static void draw_screen(uint32_t now, int requests, int data_count,
 
     gfx_frame_begin();
 
-    draw_top_bar(g_link_connected, stale, age_ms);
+    draw_top_bar(g_link_connected, stale, age_ms,
+                 d.ect_val, d.ect_valid,
+                 d.iat_val, d.iat_valid,
+                 d.volt_val, d.volt_valid);
 
     if (g_mode == MODE_QV) {
         draw_qv(&d);
