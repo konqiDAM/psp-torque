@@ -445,7 +445,13 @@ Lo último, para quien venga de una versión anterior:
   y aviso `SIN LOG` solo cuando de verdad falla la escritura.
 - **Enlace K-line más estable:** el hueco del ELM327 manda sobre el dibujado, la
   máscara `0100` se reintenta dos veces por su cuenta y una petición fuera de
-  pantalla recibe su primer turno dentro de su periodo.
+  pantalla recibe su primer turno dentro de su periodo. Los `STOPPED` se cuentan
+  en ventana deslizante, el hueco no se ancla en ellos y una reconexión prueba
+  `ATZ` sobre el socket abierto antes de tirar el WiFi, sin perder los últimos
+  valores medidos.
+- **Aviso global en la cabecera:** refrigerante, admisión o batería fuera de
+  rango, parpadeando en cualquier pantalla; mientras se reintenta la conexión el
+  contenido se atenúa para que se vea que no es de ahora.
 
 ## Documentación
 

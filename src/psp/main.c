@@ -521,6 +521,10 @@ static const int g_elm_gap_values[7] = { 0, 2, 4, 6, 8, 12, 17 };
 static int g_elm_min_gap_ms = ELM_GAP_DEFAULT_MS;
 static uint32_t g_last_resp_ms = 0;   /* anclaje del hueco */
 
+/* FASE 2.12 del autor original: si el adaptador se atasca en STOPPED se
+ * conserva el socket y se prueba un ATZ sobre el antes de tirar el WiFi. */
+static int g_try_atz = 0;
+
 /* Cadencia real del enlace (FASE F2b): hueco entre muestras aceptadas.
  *
  * Los umbrales de frescura no pueden ser fijos: en CAN un PID vuelve cada
@@ -2314,7 +2318,11 @@ static uint32_t sample_valid_ms(uint8_t pid)
     if (v < 6000u) {
         v = 6000u;
     }
-    if (v > 30000u) {
+    /* fase2.46 del autor original: un PID lento (baro, cada 30 s) vive sus
+     * tres periodos enteros, 90 s, sin el techo de 30 s que lo borraba de la
+     * rejilla antes de que volviese. Los rapidos siguen con su suelo de 6 s
+     * para que un corte no pinte una linea plana larga en la grafica. */
+    if (base < 5000u && v > 30000u) {
         v = 30000u;
     }
     return v;
@@ -2336,6 +2344,37 @@ static int sample_value_raw(uint8_t pid, uint32_t now, float *out)
     }
     *out = sample->value;
     return 1;
+}
+
+/* Color de una caja: si su muestra es mas vieja que el doble del periodo,
+ * se dibuja atenuada al 55 % en vez de desaparecer (fase2.46 del autor
+ * original). Los rapidos tienen un suelo de 3 s para no parpadear entre
+ * claro y oscuro con cada muestra. */
+static uint32_t tile_color(uint8_t pid, uint32_t now, uint32_t color)
+{
+    uint32_t period = 0;
+
+    for (int i = 0; i < g_sched.count; i++) {
+        if (g_sched.items[i].pid == pid) {
+            period = g_sched.items[i].period_ms;
+            break;
+        }
+    }
+    if (period == 0u) {
+        period = 1000u;
+    }
+    uint32_t dim_after = period * 2u;
+    if (dim_after < 3000u) {
+        dim_after = 3000u;
+    }
+    const obd_sample *s = obd_store_get(&g_store, pid);
+    if (s == NULL || !s->valid) {
+        return color;
+    }
+    if ((uint32_t)(now - s->ts_ms) > dim_after) {
+        return gfx_shade(color, 55);
+    }
+    return color;
 }
 
 /* Presion de aceite calculada: la MX-5 no tiene sensor de presion, asi
@@ -4065,6 +4104,8 @@ static int connect_network_and_elm(Target *targets, int *target_count,
     g_link_connected = 0;
     g_connect_cancel = 0;
     g_elm_stuck = 0;
+    g_try_atz = 0;
+    g_elm_window = 0;
     g_no_data_streak = 0;
     g_sample_iv_ms = 0;
     g_last_sample_ms = 0;
@@ -6995,6 +7036,7 @@ static void draw_qv(const dash_data *d)
 
 static void draw_engine(const dash_data *d)
 {
+    uint32_t now = now_ms();
     char bval[16] = "N/D";
     if (d->boost_valid) {
         fmt_signed_2(bval, sizeof(bval),
@@ -7008,62 +7050,76 @@ static void draw_engine(const dash_data *d)
     if (g_map_supported) {
         tiles[n].label = "MAP"; tiles[n].value = d->map_valid ? d->map_kpa : "N/D";
         tiles[n].unit = units_imperial() ? "psi ABS" : "kPa ABS";
-        tiles[n].color = d->map_valid ? QV_TEXT : QV_DIM;
+        tiles[n].color = d->map_valid ? tile_color(0x0B, now, QV_TEXT)
+                                      : QV_DIM;
         tiles[n].valid = d->map_valid; n++;
     } else if (g_maf_supported) {
         tiles[n].label = "MAF"; tiles[n].value = d->maf_valid ? d->maf : "N/D";
         tiles[n].unit = units_maf_name();
-        tiles[n].color = d->maf_valid ? QV_TEXT : QV_DIM;
+        tiles[n].color = d->maf_valid ? tile_color(0x10, now, QV_TEXT)
+                                      : QV_DIM;
         tiles[n].valid = d->maf_valid; n++;
     }
 
     if (g_map_supported) {
         tiles[n].label = "BOOST"; tiles[n].value = bval;
         tiles[n].unit = units_press_name();
-        tiles[n].color = d->boost_valid ? QV_TEXT : QV_DIM;
+        tiles[n].color = d->boost_valid ? tile_color(0x0B, now, QV_TEXT)
+                                        : QV_DIM;
         tiles[n].valid = d->boost_valid; n++;
     }
 
     tiles[n].label = "ECT"; tiles[n].value = d->ect_valid ? d->ect : "N/D";
     tiles[n].unit = units_temp_name();
-    tiles[n].color = d->ect_valid ? QV_TEXT : QV_DIM;
+    tiles[n].color = d->ect_valid ? tile_color(0x05, now, QV_TEXT) : QV_DIM;
     tiles[n].valid = d->ect_valid; n++;
 
     tiles[n].label = "IAT"; tiles[n].value = d->iat_valid ? d->iat : "N/D";
     tiles[n].unit = units_temp_name();
-    tiles[n].color = d->iat_valid ? QV_TEXT : QV_DIM;
+    tiles[n].color = d->iat_valid ? tile_color(0x0F, now, QV_TEXT) : QV_DIM;
     tiles[n].valid = d->iat_valid; n++;
 
     tiles[n].label = g_thr_label; tiles[n].value = d->thr_valid ? d->thr : "N/D";
     tiles[n].unit = "%";
-    tiles[n].color = d->thr_valid ? QV_TEXT : QV_DIM;
+    tiles[n].color = d->thr_valid ? tile_color(g_thr_pid, now, QV_TEXT)
+                                  : QV_DIM;
     tiles[n].valid = d->thr_valid; n++;
 
     if (d->load_valid) {
         tiles[n].label = "LOAD"; tiles[n].value = d->load;
-        tiles[n].unit = "%"; tiles[n].color = QV_TEXT; tiles[n].valid = 1; n++;
+        tiles[n].unit = "%";
+        tiles[n].color = tile_color(0x04, now, QV_TEXT);
+        tiles[n].valid = 1; n++;
     }
 
     if (g_pedal_supported) {
         tiles[n].label = "MARIPOSA"; tiles[n].value = d->plate_valid ? d->plate : "N/D";
-        tiles[n].unit = "%"; tiles[n].color = d->plate_valid ? QV_TEXT : QV_DIM;
+        tiles[n].unit = "%";
+        tiles[n].color = d->plate_valid ? tile_color(0x11, now, QV_TEXT)
+                                        : QV_DIM;
         tiles[n].valid = d->plate_valid; n++;
     }
 
     if (g_mask3 & 0x40000000u) {
         tiles[n].label = "VOLT"; tiles[n].value = d->volt_valid ? d->volt : "N/D";
-        tiles[n].unit = "V"; tiles[n].color = d->volt_valid ? QV_TEXT : QV_DIM;
+        tiles[n].unit = "V";
+        tiles[n].color = d->volt_valid ? tile_color(0x42, now, QV_TEXT)
+                                       : QV_DIM;
         tiles[n].valid = d->volt_valid; n++;
     }
 
     if (g_oil_supported && d->oil_valid) {
         tiles[n].label = "ACEITE"; tiles[n].value = d->oil;
-        tiles[n].unit = units_temp_name(); tiles[n].color = QV_TEXT; tiles[n].valid = 1; n++;
+        tiles[n].unit = units_temp_name();
+        tiles[n].color = tile_color(0x5C, now, QV_TEXT);
+        tiles[n].valid = 1; n++;
     }
 
     if (g_fuel_supported && d->fuel_valid) {
         tiles[n].label = "COMBUSTIBLE"; tiles[n].value = d->fuel;
-        tiles[n].unit = "%"; tiles[n].color = QV_TEXT; tiles[n].valid = 1; n++;
+        tiles[n].unit = "%";
+        tiles[n].color = tile_color(0x2F, now, QV_TEXT);
+        tiles[n].valid = 1; n++;
     }
 
     int m = 0;
@@ -10755,7 +10811,11 @@ static void run_dashboard(Target *targets, int target_count)
         /* FASE D1 + F1: lectura OBD no bloqueante con hueco minimo. */
         int rx_ready = 0;
         int gap_pending = 0;
-        if (sock >= 0 && !g_demo) {
+        /* FASE 2.12: con una reconexion programada no se sondea. Si el
+         * socket sigue abierto (adaptador atascado) mandar PIDs solo genera
+         * mas STOPPED, que reinician el plazo del backoff: la reconexion no
+         * llegaba a ejecutarse nunca. */
+        if (sock >= 0 && !g_demo && !reconn_active) {
             if (!rx.active) {
                 /* FASE F1: si el ELM327 aun no ha tenido su silencio,
                  * no se envia nada: el bucle sigue y la espera de la
@@ -10883,8 +10943,17 @@ static void run_dashboard(Target *targets, int target_count)
                                             : "40 errores de bus");
                     }
                     log_sync();
-                    sceNetInetClose(sock);
-                    sock = -1;
+
+                    /* FASE 2.12: si el motivo es un atasco en STOPPED, el
+                     * socket se conserva para probar ATZ al vencer el
+                     * backoff; en los demas cortes se cierra como antes.
+                     * En ningun caso se toca g_store: los ultimos valores
+                     * medidos siguen en pantalla, atenuados. */
+                    g_try_atz = (g_elm_stuck >= ELM_STUCK_RECOVER);
+                    if (!g_try_atz) {
+                        sceNetInetClose(sock);
+                        sock = -1;
+                    }
                     g_link_connected = 0;
                     memset(&rx, 0, sizeof(rx));
                     link_losses++;
@@ -10940,7 +11009,41 @@ static void run_dashboard(Target *targets, int target_count)
                 snprintf(msg, sizeof(msg), "REINTENTANDO %d/%d",
                          reconn_tries, RECONN_MAX_TRIES);
                 net_ui_set(msg);
-                sock = connect_network_and_elm(targets, &target_count, 0);
+
+                /* FASE 2.12: con el adaptador atascado el socket sigue
+                 * abierto. Se prueba ATZ sobre el antes de desconectar el
+                 * WiFi; connect_network_and_elm() limpia el almacen al
+                 * entrar, asi que los ultimos valores se guardan por valor
+                 * y se devuelven si el ATZ contesta. */
+                if (g_try_atz && sock >= 0) {
+                    obd_sample_store saved_store = g_store;
+                    boost_state saved_boost = g_boost;
+                    elm_reply r;
+                    int atz_ok = 0;
+
+                    g_try_atz = 0;
+                    memset(&r, 0, sizeof(r));
+                    elm_send_and_read(sock, "ATZ", 1500, &r);
+                    if (r.bytes > 0 && !r.stopped) {
+                        atz_ok = 1;
+                        log_file_printf("Recuperacion: ATZ OK\n");
+                    } else {
+                        log_file_printf("Recuperacion: ATZ fallo -> WiFi\n");
+                    }
+                    log_sync();
+                    /* connect_network_and_elm() abre un socket NUEVO: si
+                     * no se cierra este, el clon (unico cliente) rechaza la
+                     * segunda conexion y fuga un descriptor por intento. */
+                    sceNetInetClose(sock);
+                    sock = -1;
+                    sock = connect_network_and_elm(targets, &target_count, 0);
+                    if (sock >= 0 && atz_ok) {
+                        g_store = saved_store;
+                        g_boost = saved_boost;
+                    }
+                } else {
+                    sock = connect_network_and_elm(targets, &target_count, 0);
+                }
                 now = now_ms();
                 if (sock >= 0) {
                     reconn_active = 0;

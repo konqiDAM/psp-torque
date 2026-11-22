@@ -562,6 +562,29 @@ tras el intento de conexion del arranque y tras un reintento fallido de
 es el aviso, y el reintento que si conecta llama a `demo_toggle()` antes de
 pedir nada, asi que la medida real manda en cuanto hay coche.
 
+**Lo portado del autor original (fase2.45-2.47).** El enlace y la cabecera
+llevan tres cosas suyas, adaptadas a esta rama:
+
+- Hueco del ELM327: no se ancla en una respuesta `STOPPED` (el adaptador no
+  proceso ese comando) y se pone a cero al cerrar el socket por perdida de
+  enlace, para que el primer comando de la conexion siguiente no se mida contra
+  la ultima respuesta del enlace que acaba de morir.
+- Los `STOPPED` se cuentan en una ventana deslizante de 12 peticiones, no
+  seguidos: en un viaje real aparecen intercalados y un contador de racha no
+  llegaba nunca a los 8 que disparan la reconexion.
+- Aviso global en la cabecera (`obd_alert_eval`): refrigerante a 105/115 C,
+  admision a 70 C y bateria por debajo de 11,5 V, parpadeando en el bloque
+  derecho, en el sitio del estado y el reloj. Y, mientras se reintenta la
+  conexion, el contenido se atenua al 55 % para que se vea que no es de ahora.
+- Los PID lentos (baro cada 30 s) viven sus tres periodos y su caja se atenua
+  en vez de desaparecer; los rapidos siguen con el suelo de 6 s para no pintar
+  una linea plana en la grafica.
+- Reconexion sin perder datos: si el motivo del corte es un atasco en `STOPPED`
+  se conserva el socket y se prueba `ATZ` sobre el antes de tirar el WiFi, con
+  los ultimos valores guardados por valor y devueltos si el `ATZ` contesta. Con
+  una reconexion programada no se sondea (si no, los `STOPPED` reinician el
+  plazo y la reconexion no llega a ejecutarse).
+
 **`log=`** tiene tres posiciones: 0 no abre archivo (y por eso no sale el aviso
 `SIN LOG`: apagarlo es una decision), 1 guarda arranque, estado y resumen, y 2
 guarda ademas cada comando y cada respuesta, que es lo que hacia `log_full=1`.

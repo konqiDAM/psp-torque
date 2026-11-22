@@ -436,7 +436,12 @@ The latest, for anyone coming from an older build:
   the `SIN LOG` warning only when a write really fails.
 - **More stable K-line link:** the ELM327 gap takes priority over drawing, the
   `0100` mask is retried twice on its own, and an off-screen PID gets its first
-  turn inside its period.
+  turn inside its period. `STOPPED` answers are counted in a sliding window, the
+  gap is not anchored on them, and a reconnection tries `ATZ` on the open socket
+  before dropping the WiFi, keeping the last measured values.
+- **Global warning in the header:** coolant, intake or battery out of range,
+  blinking on any screen; while a reconnection is being retried the content dims
+  so it reads as not current.
 
 ## Documentation
 
