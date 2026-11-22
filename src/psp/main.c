@@ -81,7 +81,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define DEFAULT_HOST "192.168.0.10"
 #define DEFAULT_PORT 35000
 #define MAX_TARGETS 4
-#define BUILD_TAG "fase2.67 2026-11-20 GENERAL MX5: bloque aire/aceite/agua y avance"
+#define BUILD_TAG "fase2.68 2026-11-22 demo MX5, log de tres estados y enlace 2.47"
 #define CMD_TIMEOUT_MS 500
 
 /* En K-line la vuelta de un PID se midio en 383 ms y el clon a veces pasa
