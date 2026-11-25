@@ -579,11 +579,14 @@ llevan tres cosas suyas, adaptadas a esta rama:
 - Los PID lentos (baro cada 30 s) viven sus tres periodos y su caja se atenua
   en vez de desaparecer; los rapidos siguen con el suelo de 6 s para no pintar
   una linea plana en la grafica.
-- Reconexion sin perder datos: si el motivo del corte es un atasco en `STOPPED`
-  se conserva el socket y se prueba `ATZ` sobre el antes de tirar el WiFi, con
-  los ultimos valores guardados por valor y devueltos si el `ATZ` contesta. Con
-  una reconexion programada no se sondea (si no, los `STOPPED` reinician el
-  plazo y la reconexion no llega a ejecutarse).
+- Reconnecting without losing data: when the cut is a `STOPPED` stall the
+  socket is kept and `ATZ` is tried on it before dropping WiFi, with the last
+  measurements kept by value. The store and the learned boost scale are
+  snapshotted at link loss and restored after any reconnect attempt that does
+  not connect, so a failed WiFi cycle does not blank the tiles. `ATZ` is sent
+  after `elm_flush_input()`, because late frames from the dying link would be
+  read as its answer. With a scheduled reconnect the adapter is not probed (the
+  `STOPPED` count would restart the clock and the reconnect would never run).
 
 **`log=`** tiene tres posiciones: 0 no abre archivo (y por eso no sale el aviso
 `SIN LOG`: apagarlo es una decision), 1 guarda arranque, estado y resumen, y 2
