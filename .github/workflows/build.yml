@@ -1,0 +1,84 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: EBOOT and core tests
+    runs-on: ubuntu-latest
+    container: pspdev/pspdev:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build EBOOT.PBP
+        run: |
+          set -e
+          make clean || true
+          make 2>&1 | tee build.log
+          if grep -iE "warning:|error:" build.log; then
+            echo "::error::the build produced warnings or errors"
+            exit 1
+          fi
+          sha256sum EBOOT.PBP
+
+      - name: Core tests on the host compiler
+        run: |
+          set -e
+          make -C tests clean || true
+          make -C tests all CC=gcc
+
+      - name: Stage the app folder
+        run: |
+          set -e
+          mkdir -p dist/PSPTorque
+          cp EBOOT.PBP dist/PSPTorque/EBOOT.PBP
+          cp RUN.txt dist/PSPTorque/ 2>/dev/null || true
+
+      - name: Upload the artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: psp-torque
+          path: |
+            EBOOT.PBP
+            dist/PSPTorque
+
+  release:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the artefacts
+        uses: actions/download-artifact@v4
+        with:
+          name: psp-torque
+
+      - name: Zip the app folder
+        run: |
+          set -e
+          ls -l
+          zip -r PSPTorque.zip PSPTorque
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            EBOOT.PBP
+            PSPTorque.zip
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            PSP Torque ${{ github.ref_name }}.
+
+            Copy `PSPTorque/EBOOT.PBP` from the zip to
+            `ms0:/PSP/GAME/PSPTorque/` on the Memory Stick, or take the raw
+            `EBOOT.PBP` if that folder already exists.
