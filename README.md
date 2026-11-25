@@ -77,8 +77,8 @@ simulated.*
 
 ## Install
 
-**You need** a PSP with custom firmware (tested on a PSP-2000 and a PSP-3000
-running ARK4), an ELM327 WiFi adapter, and this app. Take `PSPTorque.zip` from
+**You need** a PSP with custom firmware (tested on a PSP-2000/3000 running
+ARK4), an ELM327 WiFi adapter, and this app. Take `PSPTorque.zip` from
 the [latest release](https://github.com/konqiDAM/psp-torque/releases/latest) and
 unzip it under `ms0:/PSP/GAME/`, or build it yourself (see [Build](#build)); a
 stock PSP will not run an unsigned EBOOT.
