@@ -172,7 +172,13 @@ The full procedure, with Docker, Windows and the Memory Stick install, is in
 
 ## License and disclaimer
 
-MIT, see [`LICENSE`](LICENSE). The project started as
+**GPL-3.0**, see [`LICENSE`](LICENSE). This program is free software: you can
+redistribute it and/or modify it under the terms of the GNU General Public
+License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version. It comes with absolutely no
+warranty.
+
+The project started as
 [autografia](https://github.com/autografia/psp-torque)'s work; this fork adds
 MX-5 support, the demo, the three-state log and the link scheduling.
 
