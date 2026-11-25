@@ -525,6 +525,14 @@ static uint32_t g_last_resp_ms = 0;   /* anclaje del hueco */
  * conserva el socket y se prueba un ATZ sobre el antes de tirar el WiFi. */
 static int g_try_atz = 0;
 
+/* Instantanea del almacen al perder el enlace. connect_network_and_elm()
+ * limpia el almacen al entrar, asi que sin esto el primer reintento fallido
+ * dejaba los cuadros en N/D: los valores del enlace perdido se devuelven
+ * tras cada intento que no conecta (antes solo se devolvian si el ATZ
+ * contestaba, y una WiFi caida no contesta nunca). */
+static obd_sample_store g_keep_store;
+static boost_state g_keep_boost;
+
 /* Cadencia real del enlace (FASE F2b): hueco entre muestras aceptadas.
  *
  * Los umbrales de frescura no pueden ser fijos: en CAN un PID vuelve cada
@@ -2363,7 +2371,13 @@ static uint32_t tile_color(uint8_t pid, uint32_t now, uint32_t color)
     if (period == 0u) {
         period = 1000u;
     }
-    uint32_t dim_after = period * 2u;
+    /* La base es la misma que la de sample_valid_ms: lo prometido es el
+     * suelo y manda el intervalo real. Con solo lo prometido, un PID que el
+     * enlace entrega cada 7 s contra una promesa de 2-3 s se atenuaba a los
+     * 4-6 s y pasaba medio ciclo al 55 %. */
+    uint32_t real_iv = g_seen_iv_ms[pid];
+    uint32_t base = (real_iv > period) ? real_iv : period;
+    uint32_t dim_after = base * 2u;
     if (dim_after < 3000u) {
         dim_after = 3000u;
     }
@@ -6122,6 +6136,9 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms,
                                        MODE_TELEMETRY };
     static const int drive_x[4] = { 6, 80, 140, 196 };
 
+    /* Donde acaba el texto de la izquierda: el bloque derecho empieza
+     * despues y no antes. */
+    int left_end;
     if (mode_is_driving(g_mode)) {
         for (int i = 0; i < 4; i++) {
             const char *name = mode_name(drive_mode[i]);
@@ -6134,13 +6151,17 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms,
                          theme_is_game() ? theme_accent() : QV_RED);
             }
         }
+        left_end = drive_x[3] +
+                   gfx_text_width(mode_name(drive_mode[3]), 1);
     } else {
         /* En una herramienta la barra dice donde estas y como volver. */
         int w = gfx_text_width(mode_name(g_mode), 1);
+        int wh = gfx_text_width(tr("HERRAMIENTAS"), 1);
+        int wb = gfx_text_width(tr("L/R: VOLVER"), 1);
         gfx_text(6, 8, mode_name(g_mode), QV_TEXT, 1);
         gfx_text(6 + w + 10, 8, tr("HERRAMIENTAS"), QV_DIM, 1);
-        gfx_text(6 + w + 10 + gfx_text_width(tr("HERRAMIENTAS"), 1) + 10, 8,
-                 tr("L/R: VOLVER"), QV_DIM, 1);
+        gfx_text(6 + w + 10 + wh + 10, 8, tr("L/R: VOLVER"), QV_DIM, 1);
+        left_end = 6 + w + 10 + wh + 10 + wb;
     }
 
     uint32_t dot = QV_CRIT;
@@ -6199,27 +6220,55 @@ static void draw_top_bar(int connected, int stale, uint32_t age_ms,
     obd_alert al = obd_alert_eval(ect, ect_valid, iat, iat_valid,
                                   volt, volt_valid);
     char righttop[40];
+    char rightalert[40];
+    int alert_on = (al.level != OBD_ALERT_NONE);
     uint32_t right_color = state_color;
 
     snprintf(righttop, sizeof(righttop), "%s  %s", state, tb);
-
-    if (al.level != OBD_ALERT_NONE &&
-        ((now_ms() / 500u) & 1u) == 0u) {
-        /* Medio segundo visible, medio oculto: la cabecera se repinta
-         * entera cada frame, asi que no queda pintura vieja. */
-        snprintf(righttop, sizeof(righttop), "! %s%s",
+    rightalert[0] = '\0';
+    if (alert_on) {
+        snprintf(rightalert, sizeof(rightalert), "! %s%s",
                  obd_alert_text(al.kind), al.more ? " +1" : "");
         right_color = (al.level == OBD_ALERT_CRIT) ? QV_CRIT : QV_AMBER;
     }
-    int right_x = GFX_W - 8 - gfx_text_width(righttop, 1);
-    /* Con la octava pestana la cabecera va justa: si el estado largo
-     * chocaria con las pestanas, se deja solo el reloj. */
-    if (right_x < 392) {
-        snprintf(righttop, sizeof(righttop), "%s", tb);
+    /* El bloque se coloca por el aviso cuando lo hay, no por el reloj: si
+     * se colocara por el reloj, el parpadeo de 500 ms moveria de sitio la
+     * lampara MIL, que cuelga de right_x. */
+    int right_x = GFX_W - 8 -
+                  gfx_text_width(alert_on ? rightalert : righttop, 1);
+    /* El bloque derecho empieza donde acaba el de la izquierda. Con un
+     * limite fijo de 392 el estado no cabia nunca (la barra de cuatro
+     * pestanas acaba en 236) y la cabecera ensenaba solo el reloj, pintado
+     * con el color del estado y sin texto que lo explicase. Un aviso NO
+     * entra aqui: "! REFRIGERANTE" mide 112 px y tiene que verse siempre,
+     * que es justo el caso para el que existe. */
+    int right_limit = left_end + 8;
+    if (g_log_broken && right_limit < 396) {
+        /* SIN LOG se dibuja pegado a la izquierda del bloque: si el log no
+         * se puede abrir, ese aviso manda. */
+        right_limit = 396;
+    }
+    if (!alert_on && right_x < right_limit) {
+        /* No caben estado y reloj: manda el estado, que es lo que explica
+         * el color. */
+        snprintf(righttop, sizeof(righttop), "%s", state);
         right_x = GFX_W - 8 - gfx_text_width(righttop, 1);
+        if (right_x < right_limit) {
+            snprintf(righttop, sizeof(righttop), "%s", tb);
+            right_x = GFX_W - 8 - gfx_text_width(righttop, 1);
+            right_color = state_color;
+        }
     }
     gfx_circle((float)(right_x - 9), 12.0f, 4.0f, dot);
-    gfx_text(right_x, 8, righttop, right_color, 1);
+    if (alert_on) {
+        /* Medio segundo visible, medio oculto: la cabecera se repinta
+         * entera cada frame, asi que no queda pintura vieja. */
+        if (((now_ms() / 500u) & 1u) == 0u) {
+            gfx_text(right_x, 8, rightalert, right_color, 1);
+        }
+    } else {
+        gfx_text(right_x, 8, righttop, right_color, 1);
+    }
 
     /* Lampara de averia: si se han leido los codigos y esta encendida se ve
      * aqui, sin tener que entrar en FALLOS. Un N/D no es un aviso. */
@@ -6258,10 +6307,14 @@ static void draw_tacho(const dash_data *d, float x, float y, float w, float h)
     /* El numero grande va en la esfera, debajo de la aguja: es una cifra
      * impresa en el cuadro, no un cartel encima de la aguja. Antes se
      * pintaba despues y la aguja desaparecia por debajo al pasar. */
+    /* En los temas de juego theme_hub() se pinta despues y con el numero a
+     * cy-16 mordia las ultimas filas de las cifras centrales: cuatro
+     * pixeles mas arriba en esos temas, y solo en ellos. */
+    int num_dy = theme_is_game() ? 20 : 16;
     if (d->rpm_valid) {
-        gfx_text_center((int)cx, (int)cy - 16, d->rpm, QV_TEXT, 3);
+        gfx_text_center((int)cx, (int)cy - num_dy, d->rpm, QV_TEXT, 3);
     } else {
-        gfx_text_center((int)cx, (int)cy - 12, "N/D", QV_DIM, 3);
+        gfx_text_center((int)cx, (int)cy - (num_dy - 4), "N/D", QV_DIM, 3);
     }
 
     if (d->rpm_valid) {
@@ -10960,6 +11013,10 @@ static void run_dashboard(Target *targets, int target_count)
                         sceNetInetClose(sock);
                         sock = -1;
                     }
+                    /* Instantanea de los ultimos valores medidos antes de
+                     * que connect_network_and_elm() limpie el almacen. */
+                    g_keep_store = g_store;
+                    g_keep_boost = g_boost;
                     g_link_connected = 0;
                     memset(&rx, 0, sizeof(rx));
                     link_losses++;
@@ -11022,16 +11079,17 @@ static void run_dashboard(Target *targets, int target_count)
                  * entrar, asi que los ultimos valores se guardan por valor
                  * y se devuelven si el ATZ contesta. */
                 if (g_try_atz && sock >= 0) {
-                    obd_sample_store saved_store = g_store;
-                    boost_state saved_boost = g_boost;
                     elm_reply r;
-                    int atz_ok = 0;
 
                     g_try_atz = 0;
                     memset(&r, 0, sizeof(r));
+                    /* El socket es el de un enlace que acaba de morir: lo
+                     * que quedase sin leer (un frame tardio del K-line, los
+                     * STOPPED del clon atascado) se leeria como respuesta
+                     * del ATZ y daria el adaptador por bueno sin serlo. */
+                    elm_flush_input(sock);
                     elm_send_and_read(sock, "ATZ", 1500, &r);
                     if (r.bytes > 0 && !r.stopped) {
-                        atz_ok = 1;
                         log_file_printf("Recuperacion: ATZ OK\n");
                     } else {
                         log_file_printf("Recuperacion: ATZ fallo -> WiFi\n");
@@ -11043,12 +11101,15 @@ static void run_dashboard(Target *targets, int target_count)
                     sceNetInetClose(sock);
                     sock = -1;
                     sock = connect_network_and_elm(targets, &target_count, 0);
-                    if (sock >= 0 && atz_ok) {
-                        g_store = saved_store;
-                        g_boost = saved_boost;
-                    }
                 } else {
                     sock = connect_network_and_elm(targets, &target_count, 0);
+                }
+                /* El intento no conecto y el almacen esta vacio: vuelven
+                 * los ultimos valores medidos para que los cuadros no se
+                 * queden en N/D entre reintentos. */
+                if (sock < 0) {
+                    g_store = g_keep_store;
+                    g_boost = g_keep_boost;
                 }
                 now = now_ms();
                 if (sock >= 0) {

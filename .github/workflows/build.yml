@@ -13,15 +13,20 @@ permissions:
 jobs:
   build:
     name: EBOOT
-    runs-on: ubuntu-latest
+    # La imagen del contenedor va por etiqueta y no por digest a proposito:
+    # un digest se queda clavado y nadie lo sube. El precio es que un pspdev
+    # nuevo puede traer un warning y tumba la puerta de abajo; si pasa, se
+    # mira el log y se actualiza el codigo o la imagen, que es el aviso.
+    runs-on: ubuntu-24.04
     container: pspdev/pspdev:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Build EBOOT.PBP
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           make clean || true
           make 2>&1 | tee build.log
           if grep -iE "warning:|error:" build.log; then
@@ -47,7 +52,7 @@ jobs:
 
   tests:
     name: Core tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -62,7 +67,7 @@ jobs:
     name: Publish the release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, tests]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Download the artefacts
         uses: actions/download-artifact@v4
