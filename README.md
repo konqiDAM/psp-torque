@@ -1,514 +1,163 @@
 # PSP Torque
 
-**Panel de telemetría OBD‑II de solo lectura para PSP.**
+**Panel de telemetría OBD‑II de solo lectura para la Sony PSP.**
 
-Lee datos reales del coche a través de un adaptador **ELM327 WiFi** y los
-representa en un dashboard gráfico de 480×272 con temas de vídeo, medidores
-de turbo, telemetría y diagnóstico.
+Lee datos reales del coche por un adaptador **ELM327 WiFi** y los pinta en un
+dashboard de 480×272: tacómetro, velocímetro, temperaturas, caudal de aire,
+presión de aceite calculada, telemetría con gráficas y códigos de avería.
 
-Desarrollado y validado sobre un **Mazda MX‑5 NB2 1.8** y un **Alfa Romeo MiTo
-Quadrifoglio Verde 2010** (1.4 Turbo MultiAir, 170 CV) con PSP‑2000/3000 y CFW
-ARK4, pero el núcleo es **universal**: usa solo OBD‑II estándar (SAE J1979) y se
-adapta a las capacidades reales de cualquier ECU.
+Validado en un **Mazda MX‑5 NB2 1.8** (K‑line) y en un **Alfa Romeo MiTo
+Quadrifoglio Verde 2010** (CAN). El núcleo es universal: usa solo OBD‑II
+estándar (SAE J1979) y se adapta a lo que responda cualquier centralita.
 
-```
-┌──────────────────────── PSP 480×272 ────────────────────────┐
-│  GENERAL   MOTOR   DIAG   TELEM   MODULOS   SNIFFER   INFO  │
-│  ┌────────┐   ┌──────────┐   ┌────────┐   ┌────────┐        │
-│  │  RPM   │   │ BOOST    │   │  ECT   │   │  MAP   │        │
-│  │  3 240 │   │  +0.82   │   │  87 °C │   │ 112 kPa│        │
-│  │  km/h  │   │   bar    │   │        │   │        │        │
-│  └────────┘   └──────────┘   └────────┘   └────────┘        │
-│                      ONLINE ·  87 km/h                       │
-└──────────────────────────────────────────────────────────────┘
-```
+![GENERAL en un MX-5](docs/images/general.png)
 
----
+*GENERAL en el MX‑5: tacómetro, velocímetro y el bloque de aire, aceite y agua
+en lugar del MAP que ese coche no tiene. Datos del modo demo (`SIM`).*
 
-## Características
+## Compatibilidad
 
-- **Solo lectura, siempre.** No escribe en la ECU, no borra códigos de fallo
-  (DTC), no codifica y no manda órdenes a actuadores.
-- **Universal.** Descubre qué PIDs existen leyendo las máscaras `0100`/`0120`/
-  `0140` reales de la centralita. Si un PID no existe, se muestra `N/D` o
-  `NO SOP.` — nunca un `0` inventado.
-- **Boost correcto.** `BOOST = MAP − presión barométrica`. La presión de
-  referencia se toma del PID `0x33`, de una captura KEY‑ON con el motor parado
-  o, en último caso, de un valor estimado marcado como `EST`.
-- **Modo universal sin PIDs de fabricante.** No usa modo 22 ni DIDs propietarios:
-  no son universales y no se inventan.
-- **9 pantallas:** `GENERAL`, `MOTOR`, `DIAG` y `TELEM` para conducir, más
-  `FALLOS`, `MODULOS`, `SNIFFER`, `INFO` y `SONDA` como herramientas.
-- **10 temas**, y los de juego cambian la estructura del reloj, la aguja y los
-  indicadores, no solo los colores.
-- **Escala, zona roja y corte de cada coche** según su perfil, con luz de cambio
-  en `SHIFT RPM`.
-- **Presión de aceite calculada** (`EST`) en los coches que no llevan sensor,
-  como el MX‑5.
-- **Panel de telemetría** con 5 series simultáneas, colores sin colisiones y
-  máximo/mínimo por serie.
-- **Dashboard editable:** cada hueco puede ser `RELOJ`, `BARRA`, `TEXTO` u
-  `OCULTO`, y se elige qué dato muestra.
-- **Descubrimiento de centralitas** (OBD‑II y UDS de identificación) y
-  **sniffer de bus CAN** para capturar el tráfico completo de la sesión.
-- **Sonda del coche** (`SONDA DEL COCHE`): pantalla de diagnóstico que lee
-  la identidad del adaptador y de la ECU, las máscaras de PID, la cabecera
-  cruda y prueba cada PID uno a uno. Sirve para saber qué puede dar un coche
-  que no es el de referencia, sin tocar el planificador a ciegas.
-- **Modo demo** del MX-5 con un perfil de conducción simulado de 90 s, para probar la
-  interfaz sin coche.
-- **Log por sesión** en la Memory Stick, con métricas de rendimiento
-  (CPU, espera, VBlanks, vértices) y resumen final de la sesión.
-- **Latencia baja:** lectura OBD no bloqueante, una sola petición en vuelo y
-  cadencia de dibujo sincronizada con VBlank. El sondeo **no** depende del
-  frame: la respuesta se detecta en ~2 ms en vez de esperar al siguiente
-  frame, y la cadencia de cada PID está calibrada contra la capacidad real
-  del enlace, no contra lo que el coche "debería" dar.
-
-## Requisitos
-
-| Componente | Detalle |
+| Coche | Estado |
 |---|---|
-| PSP | PSP‑2000 / PSP‑3000 / PSP‑E1000 con WiFi. Requiere CFW (ARK4) para la configuración de red. |
-| Adaptador | ELM327 **WiFi** (clone `v1.5` validado). Debe abrir un punto de acceso propio. |
-| Red | La PSP se conecta a la red del adaptador y habla **TCP** contra él. |
-| Coche | Cualquier vehículo con OBD‑II de lectura. |
-| Puerto | `35000` por defecto (también `23` y `2000` en otros clones). |
+| **Mazda MX‑5 NB2 1.8** (ISO 9141‑2, K‑line) | Validado en uso diario. Perfil propio: tacómetro a 8000, zona roja en 7000, corte en 7200 y relaciones de cambio medidas en el coche. |
+| Alfa Romeo MiTo Quadrifoglio Verde 2010 (CAN) | Validado. Es el coche con el que empezó el proyecto. |
+| Cualquier coche con OBD‑II de lectura | Debe funcionar: se lee qué PIDs existen y lo que no, se muestra `N/D`. |
 
-> **Limitación de hardware:** la PSP original no soporta WPA2. El adaptador
-> debe usar una red abierta, WEP o WPA‑PSK/TKIP. Con CFW y el plugin
-> `wpa2psp` se puede usar WPA2‑AES, o se puede interponer un router/ESP32
-> que hable con el adaptador. Ver
-> [`docs/COMPATIBILIDAD.md`](docs/COMPATIBILIDAD.md).
+Adaptador: ELM327 **WiFi** (probado con un clon v1.5). La PSP original no
+soporta WPA2, así que el adaptador debe abrir una red abierta, WEP o
+WPA‑PSK/TKIP; con CFW y el plugin `wpa2psp` vale WPA2. Ver
+[`docs/COMPATIBILIDAD.md`](docs/COMPATIBILIDAD.md).
 
-### Configurar el destino del adaptador
+## Qué hace
 
-La app lee `ms0:/PSP/SAVEDATA/PSPTORQUE/host.txt`. Si el archivo no existe,
-usa `192.168.0.10:35000`.
+- **Solo lectura, siempre.** No borra códigos, no codifica y no manda órdenes a
+  actuadores. Solo servicios 01/02/03/06/07/09/0A.
+- **Nueve pantallas:** cuatro de conducción (GENERAL, MOTOR, DIAG, TELEM) y
+  cinco herramientas (FALLOS, MODULOS, SNIFFER, INFO, SONDA).
+- **Diez temas**, y los de juego cambian la estructura del reloj, la aguja y los
+  indicadores, no solo los colores.
+- **Perfil por coche:** fondo de escala, zona roja, corte e indicador de marcha
+  salen del perfil del coche, no de un ajuste global.
+- **Nada inventado:** sin dato se pinta `N/D`; lo calculado (presión de aceite,
+  boost, marcha) va marcado `EST` o se deduce de medidas reales.
+- **Agujas suaves sin predicción:** el tacómetro y el velocímetro se acercan a
+  la última medida y ahí se quedan (`AGUJA`).
+- **Modo demo del MX‑5** con `L`+`R`: 90 s de conducción simulada para probar la
+  app sin coche, marcada `SIM`.
+- **Log de sesión** con tres niveles (`NO`, `SESION`, `COMPLETO`) y resumen
+  final, con métricas de CPU, espera y vértices.
 
-```
-# Formato: IP PUERTO
-192.168.0.10 35000
-```
-
-También puedes cambiar IP y puerto desde el propio menú de la app.
+| MOTOR | TELEM |
+|---|---|
+| ![MOTOR](docs/images/motor.png) | ![TELEM](docs/images/telem.png) |
 
 ## Instalación
 
-1. Copia la carpeta `PSPTorqueOBD` a `ms0:/PSP/GAME/PSPTorqueOBD/` en tu
-   Memory Stick. Debe quedar:
+1. Copia la carpeta de la app a la Memory Stick, con el `EBOOT.PBP` dentro:
 
    ```
-   ms0:/PSP/GAME/PSPTorqueOBD/EBOOT.PBP
-   ms0:/PSP/SAVEDATA/PSPTORQUE/              (datos: la app la crea)
-   ms0:/PSP/SAVEDATA/PSPTORQUE/host.txt      (opcional)
+   ms0:/PSP/GAME/PSPTorque/EBOOT.PBP
    ```
 
-2. Enciende el ELM327, pon el **contacto** con el motor **parado**.
+   Los datos (ajustes y logs) van aparte, a `ms0:/PSP/SAVEDATA/PSPTORQUE/`, y la
+   app crea la carpeta sola.
+
+2. Enciende el ELM327 y pon el **contacto** (motor parado para la primera
+   conexión).
 3. En la PSP: **Juego → Memory Stick → PSP Torque**.
-4. La app abre el dashboard al instante y, por detrás, se conecta sola al
-   perfil WiFi guardado. Verás `CONECTANDO WIFI` y `BUSCANDO ELM327` sobre el
-   propio dashboard.
-5. Si no conecta: `TRIANGLE` reintenta con el perfil guardado, `SQUARE` abre
+4. Si no conecta: `TRIANGLE` reintenta con el perfil WiFi guardado, `SQUARE` abre
    el diálogo WiFi de la PSP.
-6. Arranca el motor y deja que esté a ralentí 30–60 s.
 
-### Binario precompilado
-
-Hay una **Release** adjunta con `EBOOT.PBP` ya compilado, pero es de
-`fase2.39`: no tiene ni el perfil del MX-5 ni la salida limpia ni la pantalla
-FALLOS que se describen aquí. Para lo que cuenta esta página hay que compilar, o
-pedir el `EBOOT` de la última sesión.
+La IP y el puerto del adaptador se leen de
+`ms0:/PSP/SAVEDATA/PSPTORQUE/host.txt` (`192.168.0.10 35000` si no existe).
 
 ## Controles
 
 | Botón | Acción |
 |---|---|
-| `L` / `R` / `◀` / `▶` | Cambiar de pantalla de conducción (GENERAL, MOTOR, DIAG, TELEM) |
-| `SELECT` | Abrir / cerrar el selector de pantallas |
-| `START` | Abrir / cerrar el menú de ajustes |
-| `START` (mantener 1,2 s) | Salir de la aplicación desde cualquier pantalla, incluidas las que corren su propio bucle (sniffer, FALLOS, escaneo). Un escaneo en curso se cancela con `CIRCLE` |
+| `L` / `R` / `◀` / `▶` | Cambiar de pantalla de conducción |
+| `SELECT` | Selector de pantallas (las que el coche no puede usar salen en gris y con el motivo) |
+| `START` | Menú de ajustes |
+| `START` 1,2 s | Salir (cierre limpio: guarda ajustes y escribe el resumen del log) |
 | `TRIANGLE` | Reconectar con el perfil WiFi guardado |
-| `SQUARE` | Abrir el diálogo WiFi de la PSP y reconectar |
-| `X` o `START` | Saltar la animación de arranque · confirmar · salir del modo demo |
-| `L` + `R` (1,5 s) | Activar / desactivar el **modo demo** |
-| `CIRCLE` | Cancelar un escaneo en curso · borrar el máximo de turbo aprendido |
+| `SQUARE` | Diálogo WiFi de la PSP y reconectar |
+| `L` + `R` 1,5 s | Activar / desactivar el **modo demo** |
+| `X` | Saltar la animación de arranque · confirmar |
+| `CIRCLE` | Cancelar un escaneo · limpiar la pantalla de fallos · borrar el pico de boost |
 
-Para salir de la aplicación: mantener `START` pulsado 1,2 s, o `START` → bajar
-hasta `SALIR` → `X`. Las dos salidas son limpias: guardan los ajustes y escriben
-el resumen de la sesión al final del log. Con el botón HOME de la PSP no se
-ejecuta nada de eso y el log termina sin resumen.
+## Ajustes
 
-Desde una pantalla de herramientas, `L`/`R` vuelve a GENERAL.
+`START` abre el menú: `TEMA`, `COLOR`, `IDIOMA`, `CONTRASTE`, `ANIMACION`,
+`MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`, `RPM MAX`, `UNIDADES`,
+`TURBO AUTO`, `BOOST MAX`, `HUECO ELM`, `PANTALLA INICIAL`, `DEBUG`, `LOG`,
+`AGUJA`, `REPARTO` y `SALIR`. Se guardan en
+`ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` y se aplican al instante.
 
-## El selector de pantallas
+Los que más se tocan:
 
-`SELECT` abre la lista completa de las nueve pantallas con una línea de para qué sirve
-cada una. Arriba y abajo mueven, `X` o `START` abre la elegida, `SELECT` o `CIRCLE`
-cierra la lista. Las pantallas que el coche no puede usar salen en gris con el motivo:
-en un coche anterior a CAN, MODULOS y SNIFFER necesitan CAN y no se ofrecen.
+- **`EDITAR VISTA`** — qué dato pinta cada hueco de GENERAL y cómo: reloj, barra,
+  texto u oculto. La vista se guarda por coche.
+- **`AGUJA`** — `DIRECTA`, `SUAVE` (150 ms) o `MUY SUAVE` (400 ms) en el
+  tacómetro y el velocímetro. Los números y las barras van siempre con la medida.
+- **`REPARTO`** (0 a 4) — cuántos valores de la pantalla entran en el cupo rápido
+  del enlace. Más bajo, aguja más rápida.
+- **`SHIFT RPM`** — a qué régimen se enciende la luz de cambio.
+- **`LOG`** — `NO` no abre archivo; `SESION` guarda arranque, estado y resumen;
+  `COMPLETO` guarda además cada petición y cada respuesta.
 
-La barra y `L`/`R` llevan solo las cuatro pantallas de conducción. Desde una herramienta
-la barra dice el nombre de la pantalla y `L/R: VOLVER`, así que la vuelta está siempre a
-la vista.
-
-## Dónde arranca
-
-Se abre en la pantalla de conducción en la que se quedó. La elección se guarda en
-`ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` como `last=`, una vez por cambio y otra al
-salir. Si se quedó en una herramienta, abre GENERAL.
-
-## Las pantallas
-
-| Pantalla | Contenido |
+| DIAG | Temas |
 |---|---|
-| **GENERAL** | Tacómetro, velocímetro, boost y tiles de ECT / IAT / MAP. En un coche sin MAP, el coche cambia los tres huecos que quedarían vacíos: MAF al centro, MARCHA a un lado y AVANCE al otro. |
-| **MOTOR** | Rejilla de tiles: MAP (o MAF), BOOST, ECT, IAT, acelerador, mariposa/load, tensión, aceite y combustible. Las cajas no disponibles se compactan: no dejan huecos. |
-| **DIAG** | Diagnóstico avanzado de solo lectura: STFT, LTFT, avance, tensiones O₂, combustible, voltaje, distancia con MIL y voltaje de batería. |
-| **TELEM** | Gráfica de 5 series a la vez (por defecto RPM, boost, avance y mariposa) + máximos/mínimos de sesión. |
-| **FALLOS** | Códigos de avería: estado de la lámpara, guardados (03), pendientes (07) y permanentes (0A) con su significado, decodificados en la PSP, más la foto del fallo (02) si la ECU la da. `X` lee, `CIRCLE` limpia la pantalla — nunca la centralita. |
-| **MODULOS** | Descubrimiento de centralitas OBD‑II y UDS. `X` lanza el escaneo. Funciona también en coches de K-line, donde lee las máscaras OBD‑II y se salta el sondeo que es solo CAN. |
-| **SNIFFER** | Captura de todo el tráfico CAN del bus. `X` inicia o detiene. |
-| **INFO** | Qué es cada parámetro, con su PID estándar de origen. |
-| **SONDA** | Lee los PID uno a uno y dice cuáles responde la ECU, cuáles dan `NO DATA` y cuáles no existen. Tarda 30–60 s y se cancela con `CIRCLE`. |
-
-### Ajustes
-
-`START` abre el menú: `TEMA`, `COLOR`, `IDIOMA` (auto/español/inglés),
-`CONTRASTE`, `ANIMACION`, `MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`,
-`RPM MAX`, `UNIDADES` (métrico/imperial), `TURBO AUTO`, `BOOST MAX`, `HUECO ELM`,
-`PANTALLA INICIAL`, `DEBUG`, `LOG`, `AGUJA`, `REPARTO` y `SALIR`.
-
-`AGUJA` elige cuánto se suavizan las agujas del tacómetro y del velocímetro
-(`DIRECTA`, `SUAVE` de 150 ms o `MUY SUAVE` de 400 ms); los números y las barras
-van siempre con la medida tal cual. `REPARTO` (0 a 4) decide cuántos valores de
-la pantalla entran en el reparto rápido del enlace: más bajo, aguja más rápida.
-En un coche de CAN el reparto no se usa (la tabla base cabe entera), así que
-`REPARTO` no cambia nada en el MiTo.
-
-`LOG` decide qué se escribe en la tarjeta: `NO` no abre archivo, `SESION`
-guarda el arranque, las líneas de estado y el resumen final, y `COMPLETO` (lo
-que viene de fábrica) guarda además cada petición y cada respuesta. Si el
-archivo está apagado a propósito no sale el aviso `SIN LOG`: apagarlo es una
-decisión, no un fallo.
-
-El modo demo no arranca solo: se enciende con `L`+`R` (ver [Modo
-demo](#modo-demo)). Con el adaptador conectado, la medida real manda siempre.
-
-Se guardan en `ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` y se aplican al
-instante.
-
-## Temas
-
-`NORMAL` (con color a elegir: rojo, verde, ámbar, azul o monocromo) más nueve
-temas de juego: **FORZA**, **NFS**, **GRAN TURISMO**, **INITIAL D**,
-**CYBERPUNK**, **RETRO 80**, **NOTHING**, **BACK FUTURE** y **TODO GAS**.
-
-Los temas de juego no son un simple cambio de paleta: cambian la estructura del
-reloj (aros dobles, escala por bloques, aro técnico), la forma de la aguja
-(triangular, doble con punta de flecha, roja con contrapeso), la tipografía
-(cursiva con halo, negrita, retro) y los indicadores (barras troceadas,
-franjas rosas, barras neón segmentadas). Cada uno añade además su efecto
-propio:
-
-| Tema | Efecto |
-|---|---|
-| INITIAL D | Campaneo de aviso a 100 km/h (fijo) y `AVISO` parpadeante. |
-| NFS | Tinte azul, estelas laterales y barra de nitró que sigue la aceleración. |
-| FORZA | Marcador de `SKILL` con puntos que suben mientras aceleras fuerte. |
-| GRAN TURISMO | Medidor de G calculado y aviso rojo en la zona roja. |
-
-> **Tema `NOTHING`:** fondo oscuro, sin adornos.
+| ![DIAG](docs/images/diag.png) | ![FORZA](docs/images/theme-forza.png) |
 
 ## Modo demo
 
-Mantén `L` + `R` durante 1,5 segundos, o arranca la app sin adaptador. La
-cabecera muestra `DEMO` y el panel presenta un MX-5 NB2 simulado: ralenti,
-salida en primera, estirada completa en segunda hasta las 6.800 rpm, tercera,
-crucero en quinta alrededor de 100 km/h y frenada hasta parar, en un ciclo de
-90 s que se repite.
+Mantén `L`+`R` durante 1,5 s. La cabecera muestra `DEMO` y el panel presenta un
+**MX‑5 NB2** simulado: ralentí, salida en primera, estirada completa en segunda
+hasta las 6.800 rpm, tercera, crucero en quinta y frenada, en un ciclo de 90 s
+que se repite. El régimen sale de la velocidad y de las relaciones reales del
+cambio, el MAF del caudal que pide ese régimen y el MAP es de atmosférico.
 
-Los valores son los de ese coche, no los de un turbo: el régimen sale de la
-velocidad y de las relaciones reales del cambio de seis marchas, el MAF es el
-caudal que pide ese régimen (3 g/s al ralenti, ~83 a fondo), el MAP es de
-atmosférico (30 kPa a mariposa cerrada, 96 a fondo), el agua se queda en 88-92
-°C y el avance va de 16 grados a fondo a 36 en crucero. La presión de aceite que
-enseña el bloque es la calculada de siempre, marcada EST.
+No necesita coche ni adaptador: sirve para probar temas, escalas y unidades, o
+para una feria. Se desactiva con el mismo combo.
 
-No necesita coche ni adaptador: sirve para probar temas, escalas y unidades,
-para una feria y para ver el cuadro con datos sin arrancar el motor. Se
-desactiva con el mismo combo, y al conectar de verdad (`TRIANGLE`) se apaga
-solo.
+![GRAN TURISMO](docs/images/theme-gt.png)
 
-## Compilar desde el código
+## Compilar
 
-Requiere Docker (con la imagen `pspdev/pspdev`) o el PSPSDK instalado de
-forma nativa.
+Necesitas el [PSPSDK](https://pspdev.github.io/) (o Docker con `pspdev/pspdev`):
 
-```bash
-# Linux / macOS / Git Bash
-MSYS_NO_PATHCONV=1 docker run --rm \
-  -v "D:/ruta/al/proyecto:/src" -w /src \
-  pspdev/pspdev \
-  bash -lc 'export PATH=/usr/local/pspdev/bin:$PATH; make'
+```sh
+make            # deja EBOOT.PBP en la raíz
+make -C tests   # pruebas del núcleo en el PC
 ```
 
-```powershell
-# Windows
-powershell -ExecutionPolicy Bypass -File tools\build.ps1
-```
-
-Genera `EBOOT.PBP` en la raíz y lo copia junto a `host.txt` y `RUN.txt` en
-`dist\PSPTorqueOBD\`, listo para copiar a la Memory Stick.
-
-#### Alternativa sin Docker: WSL
-
-Si Docker no está disponible (o se rompe), el toolchain también funciona
-dentro de una distro WSL de Linux:
-
-```bash
-# 1. Extraer la imagen pspdev/pspdev del registro de Docker Hub
-#    (216 MB; no necesita el motor de Docker) a un directorio, por
-#    ejemplo D:/pspdev-root
-# 2. Copiar el toolchain a la ruta que espera:
-cp -a /mnt/d/pspdev-root/usr/local/pspdev /usr/local/
-# 3. El loader de musl busca las librerias en su fichero de ruta:
-echo /mnt/d/pspdev-root/usr/lib > /etc/ld-musl-x86_64.path
-echo /mnt/d/pspdev-root/lib     >> /etc/ld-musl-x86_64.path
-# 4. Compilar:
-sh /mnt/d/psp_torqueOBD/tools/build_wsl.sh
-```
-
-`tools/build_wsl.sh` hace la limpieza, compila, copia a `dist/` y saca el
-SHA-256.
-
-### Pruebas del núcleo
-
-El núcleo portable no depende de la PSP y se prueba en PC con `gcc`:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools\test_core.ps1
-```
-
-220 comprobaciones sobre el parser ELM327, el decodificador de PIDs, el
-cálculo de boost/baro, el scheduler, el almacén de muestras y el
-descubrimiento de módulos.
-
-### Simulador
-
-`tools/elm327_sim.ps1` levanta en el PC un servidor TCP que habla el
-protocolo ELM327 con datos sintéticos. Sirve para desarrollar la interfaz sin
-coche:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools\elm327_sim.ps1
-```
-
-## Estructura del proyecto
-
-```
-.
-├── include/obd/     Cabeceras del núcleo portable (C99, sin dependencias de PSP)
-├── src/core/        Parser ELM327, PIDs, boost/baro, scheduler, muestras, discovery, suavizado
-├── src/psp/         Capa PSP: GU, fuentes, entrada, audio, red y bucle principal
-├── tests/           Pruebas del núcleo en PC (gcc nativo)
-├── tools/           Build en Docker, simulador ELM327 y lector de logs
-├── profiles/        Perfil de vehículo con sus valores por defecto
-├── docs/            Documentación técnica de diseño
-├── assets/          Icono del EBOOT
-├── host.txt         Destino IP/puerto del ELM327
-└── RUN.txt          Manual de uso que se copia a la Memory Stick
-```
-
-## Arquitectura
-
-```
-┌──────────────────────────── PSP ────────────────────────────┐
-│  GUI (GU, 480×272, 30/60 fps)                               │
-│      ▲ muestras                                              │
-│  Scheduler de PID ──► 1 petición en vuelo ──► ELM327 (TCP)  │
-│      │                                   ▲                   │
-│  Almacén de muestras ◄── decodificadores ◄─┘                 │
-│      │                                                      │
-│  Log de sesión ◄─── Parser ELM327 ◄─── socket no bloqueante  │
-└──────────────────────────────────────────────────────────────┘
-```
-
-- **Núcleo portable en C99** (`src/core/`): parser del protocolo ELM327,
-  decodificación de PIDs estándar, cálculo de boost y barométrica,
-  scheduler de sondeo, almacén de muestras y descubrimiento de módulos.
-  Sin una sola dependencia de la PSP, y por eso se prueba en el PC.
-- **Capa PSP** (`src/psp/`): pipeline GU, fuente 8×8 propia, entrada de
-  mando, audio sintetizado, sockets `sceNetInet`/`sceNetApctl` y bucle
-  principal.
-- **Lectura no bloqueante:** el núcleo emite una sola petición OBD en vuelo
-  y avanza su estado una vez por iteración del bucle. Nunca se envía un
-  comando nuevo mientras hay otro pendiente, y la interfaz nunca se bloquea
-  esperando una respuesta.
-- **Sondeo desacoplado del render:** mientras hay una petición en vuelo, el
-  bucle espera 2 ms en vez de un VBlank completo (16,7 ms). Antes, esa espera
-  añadía ~26 ms a cada petición y limitaba el enlace a 12,6 peticiones/s;
-  ahora da ~18. La cadencia de dibujo no cambia: sigue contando VBlanks.
-- **Cadencia adaptativa, por dos bucles.** El primero reparte el presupuesto
-  del enlace entre lo que pide la pantalla activa y lo que no, y se recalcula
-  al cambiar de pantalla o de capacidad. El segundo mide lo que el adaptador
-  entrega de verdad y sube o baja ese presupuesto cada 10 s. En CAN se planifica
-  a 16,5 peticiones/s; en el K-line de la MX-5, a 2,5 (383 ms por petición son
-  2,6 físicos). Un test del núcleo calcula la demanda y falla si se pasa.
-- **Aguja suavizada, sin inventar:** las agujas del tacómetro y del velocímetro
-  se acercan a la última medida en cada fotograma y ahí se quedan: nunca
-  extrapolan por delante de la última lectura ni se inventan un valor. Los
-  números, las barras y la gráfica van siempre con la medida tal cual.
-  `AGUJA` en el menú elige `DIRECTA`, `SUAVE` (150 ms) o `MUY SUAVE` (400 ms).
-- **Panel adaptado al coche:** en la MX-5, que no tiene MAP, el GENERAL
-  cambia el hueco del centro por un bloque con el aire (MAF), la presión de
-  aceite **calculada** (marcada `EST`: ese coche no lleva sensor) y el agua; y
-  el hueco del MAP pasa a ser el avance. Un BOOST o un MAP en un coche sin ese
-  sensor se sustituyen también con la vista guardada; el bloque y la marcha
-  llegan con la vista de fábrica o con la migración de una tarjeta vieja.
-- **Reparto del enlace (`REPARTO`):** cuántos valores de pantalla entran en el
-  reparto rápido, de 0 a 4. Cada valor visible reserva su suelo y el RPM se lleva
-  el resto, así que con `REPARTO` bajo la aguja va más rápida; los valores que se
-  pintan y no entran en el cupo vuelven cada ~10 s en vez de apagarse a `N/D`.
-  Solo cuenta lo que está en pantalla, no todo lo que el perfil marca.
-- **El almacén guarda la medida tal cual llega:** el log, los máximos y el
-  histórico de la gráfica son evidencia, no presentación. El suavizado vive solo
-  en lo que se pinta.
-- **Cadencia por VBlank:** el dibujo se sincroniza con `sceDisplayGetVcount()`
-  en lugar de con temporizadores, y el número de VBlanks por fotograma se
-  ajusta solo según la carga de CPU.
-- **Memoria:** buffers y tablas estáticas; nada de `malloc` en el bucle de
-  render.
-
-Detalle completo en [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
-
-## Reglas del proyecto
-
-Estas reglas son la razón de ser del proyecto y no se negocian:
-
-1. **Solo lectura.** Nunca se envían comandos de escritura a la ECU: nada de
-   borrar DTC, codificar, actuar sobre actuadores ni cambiar parámetros.
-2. **No se inventan lecturas.** Un PID no disponible se muestra como `N/D`
-   (no disponible), nunca como `0`.
-3. **No se inventan PIDs propietarios, direcciones CAN ni comandos de
-   fabricante.** Los parámetros extendidos solo se incorporan con
-   documentación contrastada y validación en el vehículo real.
-4. **Los datos simulados se marcan siempre como `SIM`.** El simulador es una
-   herramienta de desarrollo, no una fuente de datos presentada como real.
-5. **`MAP` y `BOOST` son parámetros distintos.** `MAP` es presión absoluta
-   (kPa/bar absolutos); `BOOST` es `MAP − barométrica`. Si la barométrica no
-   es fiable, se marca como `EST`.
-
-## Limitaciones conocidas
-
-- La PSP original no soporta WPA2 (ver más arriba).
-- Los datos de suspensión, presión de turbo objetivo, DPF, EGR y otros
-  parámetros de fabricante **no son universales** y no se muestran. El
-  descubridor de módulos puede detectar esas centralitas y leer su
-  identificación estándar, pero no sus datos en vivo sin conocer los DIDs
-  concretos de ese modelo.
-- Si el coche tiene un gateway de seguridad, puede bloquear direcciones
-  CAN: el escaneo mostrará solo lo que el gateway permita.
-- La lectura del avance de encendido (`0x0E`) se omite cuando la ECU
-  devuelve valores físicamente imposibles con la escala estándar de OBD‑II.
-- El escaneo de módulos tarda entre 10 y 30 s en CAN de 11 bits y algo más
-  en CAN de 29 bits (sondea 256 direcciones físicas). Se puede cancelar con
-  `CIRCLE`.
-- La reconexión automática reintenta hasta 3 veces con 2 s de espera entre
-  intentos. Si el adaptador no vuelve, hay que reintentar a mano con
-  `TRIANGLE`.
-- El HUD está diseñado para 480×272 y no se adapta a otras resoluciones.
-
-## Novedades
-
-Lo último, para quien venga de una versión anterior:
-
-- **Agujas sin predicción.** El tacómetro y el velocímetro se acercan a la última
-  medida y ahí se quedan: nada en pantalla se adelanta al coche. `AGUJA` elige
-  `DIRECTA`, `SUAVE` (150 ms) o `MUY SUAVE` (400 ms); `REPARTO` (0 a 4) decide
-  cuántos valores entran en el cupo rápido del enlace, y el plan reparte el
-  presupuesto sin pasarse nunca (un test del núcleo lo comprueba).
-- **Escala, zona roja y corte por coche.** Cada perfil trae los suyos (MX-5:
-  8.000 de fondo, zona roja en 7.000, corte en 7.200) y `SHIFT RPM` fija la luz
-  de cambio. Un ajuste manual del tacómetro manda sobre el perfil.
-- **El GENERAL de un coche sin MAP.** El centro pasa a ser un bloque con el aire
-  (MAF, g/s), la presión de aceite **calculada** (`EST`: ese coche no lleva
-  sensor) y el agua; el velocímetro se queda en un dial estrecho y el MAP se
-  sustituye por la MARCHA y el AVANCE. Una tarjeta con la vista vieja migra
-  sola; una vista editada a mano se respeta.
-- **Presión de aceite calculada.** Con rpm y temperatura del agua, con curva de
-  frío y de caliente y marcada siempre `EST`.
-- **Demo del MX-5** de 90 s: ralenti, salida en primera, estirada completa en
-  segunda y crucero, con las relaciones reales del coche (ver [Modo
-  demo](#modo-demo)).
-- **Log de tres estados** (`NO`, `SESION`, `COMPLETO`) que se aplica en el acto,
-  y aviso `SIN LOG` solo cuando de verdad falla la escritura.
-- **Enlace K-line más estable:** el hueco del ELM327 manda sobre el dibujado, la
-  máscara `0100` se reintenta dos veces por su cuenta y una petición fuera de
-  pantalla recibe su primer turno dentro de su periodo. Los `STOPPED` se cuentan
-  en ventana deslizante, el hueco no se ancla en ellos y una reconexión prueba
-  `ATZ` sobre el socket abierto antes de tirar el WiFi, sin perder los últimos
-  valores medidos.
-- **Aviso global en la cabecera:** refrigerante, admisión o batería fuera de
-  rango, parpadeando en cualquier pantalla; mientras se reintenta la conexión el
-  contenido se atenúa para que se vea que no es de ahora.
+El procedimiento completo, con Docker, Windows y la instalación en la Memory
+Stick, está en [`docs/DESARROLLO.md`](docs/DESARROLLO.md).
 
 ## Documentación
 
-| Documento | Contenido |
+| Documento | Qué hay |
 |---|---|
-| [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Capas, concurrencia, protocolo ELM327, scheduler, errores y presupuesto de tiempo. |
-| [`docs/COMPATIBILIDAD.md`](docs/COMPATIBILIDAD.md) | PIDs estándar, fórmulas, MAP/BOOST, barométrica, límites y política para PIDs de fabricante. |
-| [`docs/UI_QV.md`](docs/UI_QV.md) | Tema QV, animación de arranque, pantallas, colores, tipografía y transiciones. |
-| [`docs/PSPGRAPHICS_MIGRATION.md`](docs/PSPGRAPHICS_MIGRATION.md) | Migración de la pantalla de texto al dashboard 2D. |
-| [`docs/ANALISIS_LOGS.md`](docs/ANALISIS_LOGS.md) | Análisis de sesiones reales en coche: desincronizaciones, cortes de bus y módulo a módulo. |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Fases, criterios de aceptación y riesgos. |
-| [`docs/FASE0.md`](docs/FASE0.md) / [`docs/FASE1.md`](docs/FASE1.md) | Viabilidad técnica y núcleo OBD con datos en vivo. |
-| [`profiles/ALFA_MITO_QV_2010.md`](profiles/ALFA_MITO_QV_2010.md) | Perfil del vehículo de referencia y valores por defecto. |
-| [`RUN.txt`](RUN.txt) | Manual de uso completo. |
+| [`docs/DESARROLLO.md`](docs/DESARROLLO.md) | Compilar, instalar, depurar. |
+| [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Cómo está montado por dentro: enlace, planificador, pintado. |
+| [`docs/COMPATIBILIDAD.md`](docs/COMPATIBILIDAD.md) | Adaptadores, WiFi de la PSP, protocolos. |
+| [`docs/COMPATIBILIDAD_MX5_NB2.md`](docs/COMPATIBILIDAD_MX5_NB2.md) | Lo que se sabe del MX‑5 NB2: PIDs, ritmos y límites. |
+| [`docs/PRUEBAS_PENDIENTES.md`](docs/PRUEBAS_PENDIENTES.md) | Lo que falta por probar en el coche. |
 
-## Roadmap
+## Reglas del proyecto
 
-- Lectura OBD no bloqueante con reconexión automática. *(hecho)*
-- Cadencia de sondeo y suavizado recalibrados contra el enlace real. *(hecho)*
-- Perfil de vehículo editable desde la PSP.
-- Exportación CSV de la sesión con formato largo.
-- Sondear en alta cadencia solo lo que la pantalla activa necesita. *(hecho)*
-- Soporte de mas de una PSP (PSP‑E1000 sin WiFi, PSP‑Street).
-- Perfiles específicos de fabricante, siempre documentados y validados.
+1. **Solo lectura.** Nunca se escribe en la ECU.
+2. **No se inventan lecturas.** Un PID que no existe se pinta `N/D`, nunca `0`.
+3. **Los datos simulados van marcados** `SIM`, y lo calculado, `EST`.
+4. **`MAP` y `BOOST` no son lo mismo:** `BOOST` es `MAP` menos la presión
+   barométrica, y si la referencia no es fiable se marca `EST`.
 
-## Aviso
+## Licencia y aviso
 
-Proyecto personal, **no afiliado** a Alfa Romeo, Fiat, Stellantis, Sony,
-ELM Electronics ni a ninguna de las marcas o juegos referenciados en los
-temas. Las marcas se usan únicamente de forma descriptiva.
+MIT, ver [`LICENSE`](LICENSE). El proyecto nació del trabajo de
+[autografia](https://github.com/autografia/psp-torque); este fork añade el
+soporte del MX‑5, la demo, el log de tres estados y el reparto del enlace.
 
-No sustituye a la instrumentación del vehículo ni a un diagnóstico
-profesional. **No manipules la PSP mientras conduces**: debe ir montada y
-manejada por el acompañante.
-
-## Licencia
-
-**GPL‑3.0** — ver [`LICENSE`](LICENSE).
-
-El código fuente de este repositorio está bajo esa licencia. Si redistribuyes
-el binario o una versión modificada, publica también el código fuente
-correspondiente.
-
-## Desarrollo
-
-Las pruebas del núcleo son la puerta de entrada de cualquier cambio:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools\test_core.ps1
-```
-
-Y para compilar la PSP:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools\build.ps1
-```
-
----
-
-[English version](README_EN.md) · [Documentación](docs/) · [Perfil del vehículo](profiles/ALFA_MITO_QV_2010.md)
+No es un producto sanitario ni una herramienta de taller: úsalo como lo que es,
+un panel informativo, y no mires la pantalla más de lo que mirarías el cuadro del
+coche. [Versión en inglés](README_EN.md).
