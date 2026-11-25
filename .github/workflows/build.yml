@@ -72,8 +72,8 @@ jobs:
       - name: Zip the app folder
         run: |
           set -e
-          ls -l
-          zip -r PSPTorque.zip PSPTorque
+          ls -l dist
+          cd dist && zip -r ../PSPTorque.zip PSPTorque
 
       - name: Publish
         uses: softprops/action-gh-release@v2
