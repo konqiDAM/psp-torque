@@ -6255,6 +6255,15 @@ static void draw_tacho(const dash_data *d, float x, float y, float w, float h)
         (redline_rpm() / tach_max_rpm());
     theme_redline(cx, cy, r, red_start, 405.0f);
 
+    /* El numero grande va en la esfera, debajo de la aguja: es una cifra
+     * impresa en el cuadro, no un cartel encima de la aguja. Antes se
+     * pintaba despues y la aguja desaparecia por debajo al pasar. */
+    if (d->rpm_valid) {
+        gfx_text_center((int)cx, (int)cy - 16, d->rpm, QV_TEXT, 3);
+    } else {
+        gfx_text_center((int)cx, (int)cy - 12, "N/D", QV_DIM, 3);
+    }
+
     if (d->rpm_valid) {
         float ratio = clamp_float(d->rpm_val / tach_max_rpm(), 0.0f, 1.0f);
         uint32_t c = QV_TEXT;
@@ -6269,14 +6278,11 @@ static void draw_tacho(const dash_data *d, float x, float y, float w, float h)
         theme_value(cx, cy, r, 135.0f + 270.0f * ratio, c, 6.0f);
         theme_needle(cx, cy, r, ratio, theme_is_game() ? theme_accent() : c);
         theme_hub(cx, cy, theme_accent());
-        gfx_text_center((int)cx, (int)cy - 16, d->rpm, QV_TEXT, 3);
 
         if (g_cfg.shift_rpm > 0 && d->rpm_raw >= (float)g_cfg.shift_rpm) {
             int sy = theme_is_game() ? 50 : 34;
             gfx_text_center((int)cx, (int)cy + sy, "SHIFT", QV_RED, 1);
         }
-    } else {
-        gfx_text_center((int)cx, (int)cy - 12, "N/D", QV_DIM, 3);
     }
 
     /* Remate inferior propio del tema. */

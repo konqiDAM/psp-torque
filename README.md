@@ -23,6 +23,18 @@ instead of the MAP that car does not have. Demo data (`SIM`).*
 | Alfa Romeo MiTo Quadrifoglio Verde 2010 (CAN) | Validated. The car the project started on. |
 | Any car with read-only OBD-II | Should work: the app reads which PIDs exist and shows `N/D` for the rest. |
 
+The MiTo is the car the project grew up on, and its view is still the
+turbo one: the centre of GENERAL is a boost gauge, the tachometer runs to 7,000
+with the red zone at 6,500, and the theme effects (the nitrous bar, the
+`SKILL` marker, the G-meter) are tuned for it.
+
+| MiTo, GENERAL | MiTo, MOTOR |
+|---|---|
+| ![MiTo GENERAL](docs/images/mito-general.png) | ![MiTo MOTOR](docs/images/mito-motor.png) |
+
+*The MiTo view in demo mode: boost in the centre, turbo manifold pressure, and
+the same layout the car has used since the first drive.*
+
 Adapter: ELM327 **WiFi** (tested with a v1.5 clone). The stock PSP does not
 support WPA2, so the adapter has to open an open, WEP or WPA-PSK/TKIP network;
 with CFW and the `wpa2psp` plugin WPA2 works too. See
@@ -105,7 +117,7 @@ The ones you actually touch:
 - **`LOG`** — `NO` opens no file; `SESION` keeps boot, status and the summary;
   `COMPLETO` also keeps every command and reply.
 
-| DIAG | Themes |
+| DIAG | FORZA |
 |---|---|
 | ![DIAG](docs/images/diag.png) | ![FORZA](docs/images/theme-forza.png) |
 
@@ -120,7 +132,12 @@ revs ask for, and manifold pressure is naturally aspirated.
 It needs neither car nor adapter: it is for trying themes, scales and units, or
 for a car show. The same combo turns it off.
 
-![GRAN TURISMO](docs/images/theme-gt.png)
+| NFS | GRAN TURISMO |
+|---|---|
+| ![NFS](docs/images/theme-nfs.png) | ![GRAN TURISMO](docs/images/theme-gt.png) |
+
+*The game themes change the dial, the needle and the indicators, not just the
+colours: these are the same demo lap in FORZA, NFS and GRAN TURISMO.*
 
 ## Build
 
