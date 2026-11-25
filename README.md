@@ -1,163 +1,164 @@
 # PSP Torque
 
-**Panel de telemetría OBD‑II de solo lectura para la Sony PSP.**
+**A read-only OBD-II dashboard for the Sony PSP.**
 
-Lee datos reales del coche por un adaptador **ELM327 WiFi** y los pinta en un
-dashboard de 480×272: tacómetro, velocímetro, temperaturas, caudal de aire,
-presión de aceite calculada, telemetría con gráficas y códigos de avería.
+It reads real data from the car through an **ELM327 WiFi** adapter and draws it
+on a 480×272 dashboard: tachometer, speedometer, temperatures, airflow,
+calculated oil pressure, telemetry traces and fault codes.
 
-Validado en un **Mazda MX‑5 NB2 1.8** (K‑line) y en un **Alfa Romeo MiTo
-Quadrifoglio Verde 2010** (CAN). El núcleo es universal: usa solo OBD‑II
-estándar (SAE J1979) y se adapta a lo que responda cualquier centralita.
+Validated on a **Mazda MX-5 NB2 1.8** (K-line) and on an **Alfa Romeo MiTo
+Quadrifoglio Verde 2010** (CAN). The core is universal: it speaks only standard
+OBD-II (SAE J1979) and adapts to whatever the ECU answers.
 
-![GENERAL en un MX-5](docs/images/general.png)
+![GENERAL on an MX-5](docs/images/general.png)
 
-*GENERAL en el MX‑5: tacómetro, velocímetro y el bloque de aire, aceite y agua
-en lugar del MAP que ese coche no tiene. Datos del modo demo (`SIM`).*
+*GENERAL on the MX-5: tachometer, speedometer and the air, oil and water block
+instead of the MAP that car does not have. Demo data (`SIM`).*
 
-## Compatibilidad
+## Compatibility
 
-| Coche | Estado |
+| Car | State |
 |---|---|
-| **Mazda MX‑5 NB2 1.8** (ISO 9141‑2, K‑line) | Validado en uso diario. Perfil propio: tacómetro a 8000, zona roja en 7000, corte en 7200 y relaciones de cambio medidas en el coche. |
-| Alfa Romeo MiTo Quadrifoglio Verde 2010 (CAN) | Validado. Es el coche con el que empezó el proyecto. |
-| Cualquier coche con OBD‑II de lectura | Debe funcionar: se lee qué PIDs existen y lo que no, se muestra `N/D`. |
+| **Mazda MX-5 NB2 1.8** (ISO 9141-2, K-line) | Validated daily. Its own profile: 8,000 tachometer, red zone at 7,000, cut at 7,200 and gear ratios measured on the car. |
+| Alfa Romeo MiTo Quadrifoglio Verde 2010 (CAN) | Validated. The car the project started on. |
+| Any car with read-only OBD-II | Should work: the app reads which PIDs exist and shows `N/D` for the rest. |
 
-Adaptador: ELM327 **WiFi** (probado con un clon v1.5). La PSP original no
-soporta WPA2, así que el adaptador debe abrir una red abierta, WEP o
-WPA‑PSK/TKIP; con CFW y el plugin `wpa2psp` vale WPA2. Ver
+Adapter: ELM327 **WiFi** (tested with a v1.5 clone). The stock PSP does not
+support WPA2, so the adapter has to open an open, WEP or WPA-PSK/TKIP network;
+with CFW and the `wpa2psp` plugin WPA2 works too. See
 [`docs/COMPATIBILIDAD.md`](docs/COMPATIBILIDAD.md).
 
-## Qué hace
+## What it does
 
-- **Solo lectura, siempre.** No borra códigos, no codifica y no manda órdenes a
-  actuadores. Solo servicios 01/02/03/06/07/09/0A.
-- **Nueve pantallas:** cuatro de conducción (GENERAL, MOTOR, DIAG, TELEM) y
-  cinco herramientas (FALLOS, MODULOS, SNIFFER, INFO, SONDA).
-- **Diez temas**, y los de juego cambian la estructura del reloj, la aguja y los
-  indicadores, no solo los colores.
-- **Perfil por coche:** fondo de escala, zona roja, corte e indicador de marcha
-  salen del perfil del coche, no de un ajuste global.
-- **Nada inventado:** sin dato se pinta `N/D`; lo calculado (presión de aceite,
-  boost, marcha) va marcado `EST` o se deduce de medidas reales.
-- **Agujas suaves sin predicción:** el tacómetro y el velocímetro se acercan a
-  la última medida y ahí se quedan (`AGUJA`).
-- **Modo demo del MX‑5** con `L`+`R`: 90 s de conducción simulada para probar la
-  app sin coche, marcada `SIM`.
-- **Log de sesión** con tres niveles (`NO`, `SESION`, `COMPLETO`) y resumen
-  final, con métricas de CPU, espera y vértices.
+- **Read-only, always.** No clearing codes, no coding, no actuator commands.
+  Services 01/02/03/06/07/09/0A only.
+- **Nine screens:** four for driving (GENERAL, MOTOR, DIAG, TELEM) and five
+  tools (FALLOS, MODULOS, SNIFFER, INFO, SONDA).
+- **Ten themes**, and the game ones change the structure of the dial, the needle
+  and the indicators, not just the colours.
+- **Per-car profile:** scale, red zone, cut and gear indicator come from the
+  car's profile, not from a global setting.
+- **Nothing invented:** no data is `N/D`; what is calculated (oil pressure,
+  boost, gear) is marked `EST` or derived from real measurements.
+- **Smooth needles with no prediction:** the tachometer and speedometer approach
+  the last measurement and stay there (`AGUJA`).
+- **MX-5 demo** with `L`+`R`: 90 s of simulated driving to try the app without a
+  car, marked `SIM`.
+- **Session log** with three levels (`NO`, `SESION`, `COMPLETO`) and a final
+  summary, with CPU, wait and vertex metrics.
 
 | MOTOR | TELEM |
 |---|---|
 | ![MOTOR](docs/images/motor.png) | ![TELEM](docs/images/telem.png) |
 
-## Instalación
+## Install
 
-1. Copia la carpeta de la app a la Memory Stick, con el `EBOOT.PBP` dentro:
+1. Copy the app folder to the Memory Stick with `EBOOT.PBP` inside:
 
    ```
    ms0:/PSP/GAME/PSPTorque/EBOOT.PBP
    ```
 
-   Los datos (ajustes y logs) van aparte, a `ms0:/PSP/SAVEDATA/PSPTORQUE/`, y la
-   app crea la carpeta sola.
+   Data (settings and logs) lives separately in `ms0:/PSP/SAVEDATA/PSPTORQUE/`,
+   and the app creates that folder itself.
 
-2. Enciende el ELM327 y pon el **contacto** (motor parado para la primera
-   conexión).
-3. En la PSP: **Juego → Memory Stick → PSP Torque**.
-4. Si no conecta: `TRIANGLE` reintenta con el perfil WiFi guardado, `SQUARE` abre
-   el diálogo WiFi de la PSP.
+2. Power the ELM327 and turn the **ignition** on (engine off for the first
+   connection).
+3. On the PSP: **Game → Memory Stick → PSP Torque**.
+4. If it does not connect: `TRIANGLE` retries with the saved WiFi profile,
+   `SQUARE` opens the PSP WiFi dialog.
 
-La IP y el puerto del adaptador se leen de
-`ms0:/PSP/SAVEDATA/PSPTORQUE/host.txt` (`192.168.0.10 35000` si no existe).
+The adapter address is read from `ms0:/PSP/SAVEDATA/PSPTORQUE/host.txt`
+(`192.168.0.10 35000` when the file does not exist).
 
-## Controles
+## Controls
 
-| Botón | Acción |
+| Button | Action |
 |---|---|
-| `L` / `R` / `◀` / `▶` | Cambiar de pantalla de conducción |
-| `SELECT` | Selector de pantallas (las que el coche no puede usar salen en gris y con el motivo) |
-| `START` | Menú de ajustes |
-| `START` 1,2 s | Salir (cierre limpio: guarda ajustes y escribe el resumen del log) |
-| `TRIANGLE` | Reconectar con el perfil WiFi guardado |
-| `SQUARE` | Diálogo WiFi de la PSP y reconectar |
-| `L` + `R` 1,5 s | Activar / desactivar el **modo demo** |
-| `X` | Saltar la animación de arranque · confirmar |
-| `CIRCLE` | Cancelar un escaneo · limpiar la pantalla de fallos · borrar el pico de boost |
+| `L` / `R` / `◀` / `▶` | Change driving screen |
+| `SELECT` | Screen picker (screens the car cannot use are greyed with the reason) |
+| `START` | Settings menu |
+| `START` 1.2 s | Exit (clean: saves settings and writes the session summary) |
+| `TRIANGLE` | Reconnect with the saved WiFi profile |
+| `SQUARE` | PSP WiFi dialog, then reconnect |
+| `L` + `R` 1.5 s | Turn the **demo mode** on / off |
+| `X` | Skip the boot animation · confirm |
+| `CIRCLE` | Cancel a scan · clear the fault screen · reset the learned boost peak |
 
-## Ajustes
+## Settings
 
-`START` abre el menú: `TEMA`, `COLOR`, `IDIOMA`, `CONTRASTE`, `ANIMACION`,
+`START` opens the menu: `TEMA`, `COLOR`, `IDIOMA`, `CONTRASTE`, `ANIMACION`,
 `MUESTREO`, `EDITAR VISTA`, `PICO MAX`, `SHIFT RPM`, `RPM MAX`, `UNIDADES`,
 `TURBO AUTO`, `BOOST MAX`, `HUECO ELM`, `PANTALLA INICIAL`, `DEBUG`, `LOG`,
-`AGUJA`, `REPARTO` y `SALIR`. Se guardan en
-`ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` y se aplican al instante.
+`AGUJA`, `REPARTO` and `SALIR`. They live in
+`ms0:/PSP/SAVEDATA/PSPTORQUE/settings.txt` and apply immediately.
 
-Los que más se tocan:
+The ones you actually touch:
 
-- **`EDITAR VISTA`** — qué dato pinta cada hueco de GENERAL y cómo: reloj, barra,
-  texto u oculto. La vista se guarda por coche.
-- **`AGUJA`** — `DIRECTA`, `SUAVE` (150 ms) o `MUY SUAVE` (400 ms) en el
-  tacómetro y el velocímetro. Los números y las barras van siempre con la medida.
-- **`REPARTO`** (0 a 4) — cuántos valores de la pantalla entran en el cupo rápido
-  del enlace. Más bajo, aguja más rápida.
-- **`SHIFT RPM`** — a qué régimen se enciende la luz de cambio.
-- **`LOG`** — `NO` no abre archivo; `SESION` guarda arranque, estado y resumen;
-  `COMPLETO` guarda además cada petición y cada respuesta.
+- **`EDITAR VISTA`** — which value each GENERAL slot shows and how: gauge, bar,
+  text or hidden. The view is saved per car.
+- **`AGUJA`** — `DIRECT`, `SOFT` (150 ms) or `VERY SOFT` (400 ms) on the
+  tachometer and speedometer. Numbers and bars always show the raw measurement.
+- **`REPARTO`** (0 to 4) — how many on-screen values share the fast part of the
+  link. Lower means a faster needle.
+- **`SHIFT RPM`** — where the shift light comes on.
+- **`LOG`** — `NO` opens no file; `SESION` keeps boot, status and the summary;
+  `COMPLETO` also keeps every command and reply.
 
-| DIAG | Temas |
+| DIAG | Themes |
 |---|---|
 | ![DIAG](docs/images/diag.png) | ![FORZA](docs/images/theme-forza.png) |
 
-## Modo demo
+## Demo mode
 
-Mantén `L`+`R` durante 1,5 s. La cabecera muestra `DEMO` y el panel presenta un
-**MX‑5 NB2** simulado: ralentí, salida en primera, estirada completa en segunda
-hasta las 6.800 rpm, tercera, crucero en quinta y frenada, en un ciclo de 90 s
-que se repite. El régimen sale de la velocidad y de las relaciones reales del
-cambio, el MAF del caudal que pide ese régimen y el MAP es de atmosférico.
+Hold `L`+`R` for 1.5 seconds. The header shows `DEMO` and the dashboard presents
+a simulated **MX-5 NB2**: idle, a launch in first, a full pull in second to 6,800
+rpm, third, a cruise in fifth and braking, in a 90 s cycle that repeats. Engine
+speed comes from road speed and the real gear ratios, MAF from the airflow those
+revs ask for, and manifold pressure is naturally aspirated.
 
-No necesita coche ni adaptador: sirve para probar temas, escalas y unidades, o
-para una feria. Se desactiva con el mismo combo.
+It needs neither car nor adapter: it is for trying themes, scales and units, or
+for a car show. The same combo turns it off.
 
 ![GRAN TURISMO](docs/images/theme-gt.png)
 
-## Compilar
+## Build
 
-Necesitas el [PSPSDK](https://pspdev.github.io/) (o Docker con `pspdev/pspdev`):
+You need the [PSPSDK](https://pspdev.github.io/) (or Docker with
+`pspdev/pspdev`):
 
 ```sh
-make            # deja EBOOT.PBP en la raíz
-make -C tests   # pruebas del núcleo en el PC
+make            # leaves EBOOT.PBP in the root
+make -C tests   # core tests on the PC
 ```
 
-El procedimiento completo, con Docker, Windows y la instalación en la Memory
-Stick, está en [`docs/DESARROLLO.md`](docs/DESARROLLO.md).
+The full procedure, with Docker, Windows and the Memory Stick install, is in
+[`docs/DESARROLLO.md`](docs/DESARROLLO.md).
 
-## Documentación
+## Documentation
 
-| Documento | Qué hay |
+| Document | Contents |
 |---|---|
-| [`docs/DESARROLLO.md`](docs/DESARROLLO.md) | Compilar, instalar, depurar. |
-| [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Cómo está montado por dentro: enlace, planificador, pintado. |
-| [`docs/COMPATIBILIDAD.md`](docs/COMPATIBILIDAD.md) | Adaptadores, WiFi de la PSP, protocolos. |
-| [`docs/COMPATIBILIDAD_MX5_NB2.md`](docs/COMPATIBILIDAD_MX5_NB2.md) | Lo que se sabe del MX‑5 NB2: PIDs, ritmos y límites. |
-| [`docs/PRUEBAS_PENDIENTES.md`](docs/PRUEBAS_PENDIENTES.md) | Lo que falta por probar en el coche. |
+| [`docs/DESARROLLO.md`](docs/DESARROLLO.md) | Build, install, debug. |
+| [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | How it works inside: link, scheduler, drawing. |
+| [`docs/COMPATIBILIDAD.md`](docs/COMPATIBILIDAD.md) | Adapters, PSP WiFi, protocols. |
+| [`docs/COMPATIBILIDAD_MX5_NB2.md`](docs/COMPATIBILIDAD_MX5_NB2.md) | What is known about the MX-5 NB2: PIDs, rates, limits. |
+| [`docs/PRUEBAS_PENDIENTES.md`](docs/PRUEBAS_PENDIENTES.md) | What still needs testing in the car. |
 
-## Reglas del proyecto
+## Project rules
 
-1. **Solo lectura.** Nunca se escribe en la ECU.
-2. **No se inventan lecturas.** Un PID que no existe se pinta `N/D`, nunca `0`.
-3. **Los datos simulados van marcados** `SIM`, y lo calculado, `EST`.
-4. **`MAP` y `BOOST` no son lo mismo:** `BOOST` es `MAP` menos la presión
-   barométrica, y si la referencia no es fiable se marca `EST`.
+1. **Read-only.** Nothing is ever written to the ECU.
+2. **No invented readings.** A PID that does not exist shows `N/D`, never `0`.
+3. **Simulated data is marked** `SIM`, and calculated values `EST`.
+4. **`MAP` and `BOOST` are not the same:** `BOOST` is `MAP` minus barometric
+   pressure, and if the reference is not trustworthy it is marked `EST`.
 
-## Licencia y aviso
+## License and disclaimer
 
-MIT, ver [`LICENSE`](LICENSE). El proyecto nació del trabajo de
-[autografia](https://github.com/autografia/psp-torque); este fork añade el
-soporte del MX‑5, la demo, el log de tres estados y el reparto del enlace.
+MIT, see [`LICENSE`](LICENSE). The project started as
+[autografia](https://github.com/autografia/psp-torque)'s work; this fork adds
+MX-5 support, the demo, the three-state log and the link scheduling.
 
-No es un producto sanitario ni una herramienta de taller: úsalo como lo que es,
-un panel informativo, y no mires la pantalla más de lo que mirarías el cuadro del
-coche. [Versión en inglés](README_EN.md).
+It is not a medical device nor a workshop tool: use it as what it is, an
+information panel, and do not stare at it more than you would at the car's own
+dash.
